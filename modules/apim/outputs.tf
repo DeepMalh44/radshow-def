@@ -45,10 +45,10 @@ output "private_ip_addresses" {
 
 output "identity_principal_id" {
   description = "Principal ID of the SystemAssigned managed identity"
-  value       = azurerm_api_management.this.identity[0].principal_id
+  value       = try(azurerm_api_management.this.identity[0].principal_id, null)
 }
 
 output "identity_tenant_id" {
   description = "Tenant ID of the SystemAssigned managed identity"
-  value       = azurerm_api_management.this.identity[0].tenant_id
+  value       = try(azurerm_api_management.this.identity[0].tenant_id, null)
 }
