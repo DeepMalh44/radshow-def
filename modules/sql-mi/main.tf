@@ -57,7 +57,7 @@ data "azurerm_subscription" "current" {}
 # Failover Group (conditional)
 # -------------------------------------------------------------------
 resource "azurerm_mssql_managed_instance_failover_group" "this" {
-  count = var.enable_failover_group ? 1 : 0
+  count = var.enable_failover_group && var.secondary_instance_id != "" ? 1 : 0
 
   name                        = var.failover_group_name
   location                    = var.location

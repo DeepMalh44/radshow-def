@@ -8,6 +8,11 @@ output "vnet_name" {
   value       = azurerm_virtual_network.this.name
 }
 
+output "resource_group_name" {
+  description = "Name of the resource group containing the VNet"
+  value       = var.resource_group_name
+}
+
 output "subnet_ids" {
   description = "Map of subnet name to subnet ID"
   value       = { for k, v in azurerm_subnet.this : k => v.id }

@@ -40,7 +40,7 @@ resource "azurerm_redis_cache" "this" {
 }
 
 resource "azurerm_redis_linked_server" "this" {
-  count                       = var.enable_geo_replication ? 1 : 0
+  count                       = var.enable_geo_replication && var.linked_cache_id != "" ? 1 : 0
   target_redis_cache_name     = azurerm_redis_cache.this.name
   resource_group_name         = var.resource_group_name
   linked_redis_cache_id       = var.linked_cache_id

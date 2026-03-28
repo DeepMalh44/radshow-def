@@ -76,7 +76,7 @@ variable "connection_strings" {
 }
 
 variable "identity_type" {
-  description = "Type of managed identity (SystemAssigned, UserAssigned, SystemAssigned, UserAssigned)"
+  description = "Type of managed identity (SystemAssigned, UserAssigned, or SystemAssigned, UserAssigned combined)"
   type        = string
   default     = "SystemAssigned"
 }
