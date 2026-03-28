@@ -41,7 +41,8 @@ resource "azurerm_container_registry" "this" {
   }
 
   identity {
-    type = var.identity_type
+    type         = var.identity_type
+    identity_ids = var.identity_type != "SystemAssigned" ? var.user_assigned_identity_ids : null
   }
 
   tags = var.tags

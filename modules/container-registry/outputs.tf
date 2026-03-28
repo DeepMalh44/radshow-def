@@ -27,5 +27,5 @@ output "admin_password" {
 
 output "identity_principal_id" {
   description = "The principal ID of the system-assigned managed identity"
-  value       = azurerm_container_registry.this.identity[0].principal_id
+  value       = try(azurerm_container_registry.this.identity[0].principal_id, null)
 }

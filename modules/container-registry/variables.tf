@@ -79,6 +79,12 @@ variable "identity_type" {
   }
 }
 
+variable "user_assigned_identity_ids" {
+  description = "List of user-assigned managed identity IDs (required when identity_type includes UserAssigned)"
+  type        = list(string)
+  default     = null
+}
+
 variable "enable_diagnostics" {
   description = "Whether to enable diagnostic settings"
   type        = bool

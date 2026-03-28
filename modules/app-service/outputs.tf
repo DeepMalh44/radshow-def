@@ -25,7 +25,7 @@ output "outbound_ip_addresses" {
 
 output "identity_principal_id" {
   description = "Principal ID of the managed identity"
-  value       = azurerm_linux_web_app.this.identity[0].principal_id
+  value       = try(azurerm_linux_web_app.this.identity[0].principal_id, null)
 }
 
 output "slot_id" {
