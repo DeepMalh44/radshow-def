@@ -8,7 +8,7 @@ resource "azurerm_redis_cache" "this" {
   enable_non_ssl_port           = var.enable_non_ssl_port
   minimum_tls_version           = var.minimum_tls_version
   shard_count                   = var.sku_name == "Premium" ? var.shard_count : 0
-  replicas_per_master           = var.replicas_per_master
+  replicas_per_primary          = var.replicas_per_primary
   zones                         = length(var.zones) > 0 ? var.zones : null
   subnet_id                     = var.subnet_id
   private_static_ip_address     = var.private_static_ip_address

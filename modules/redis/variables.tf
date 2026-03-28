@@ -49,8 +49,8 @@ variable "shard_count" {
   default     = 0
 }
 
-variable "replicas_per_master" {
-  description = "Number of replicas per master node"
+variable "replicas_per_primary" {
+  description = "Number of replicas per primary node"
   type        = number
   default     = 1
 }
