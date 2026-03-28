@@ -107,6 +107,12 @@ variable "log_analytics_workspace_id" {
   default     = ""
 }
 
+variable "zone_redundant" {
+  description = "Whether the App Service Plan should be zone redundant"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

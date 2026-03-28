@@ -117,6 +117,12 @@ variable "ip_restrictions" {
   default = []
 }
 
+variable "zone_redundant" {
+  description = "Whether the App Service Plan should be zone redundant"
+  type        = bool
+  default     = false
+}
+
 variable "enable_diagnostics" {
   description = "Whether to enable diagnostic settings"
   type        = bool
