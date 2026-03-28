@@ -1,14 +1,3 @@
-terraform {
-  required_providers {
-    azapi = {
-      source = "azure/azapi"
-    }
-    azurerm = {
-      source = "hashicorp/azurerm"
-    }
-  }
-}
-
 locals {
   sku_parts = split("_", var.sku_name)
   sku_tier  = local.sku_parts[0] == "GP" ? "GeneralPurpose" : local.sku_parts[0] == "BC" ? "BusinessCritical" : "GeneralPurpose"
@@ -52,6 +41,8 @@ resource "azapi_resource" "sql_mi" {
   }
 
   tags = var.tags
+
+  response_export_values = ["properties.fullyQualifiedDomainName", "identity"]
 
   timeouts {
     create = "6h"

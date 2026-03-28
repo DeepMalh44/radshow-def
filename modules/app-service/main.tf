@@ -131,7 +131,7 @@ resource "azurerm_linux_web_app_slot" "staging" {
 }
 
 resource "azurerm_monitor_diagnostic_setting" "this" {
-  count                      = var.enable_diagnostics ? 1 : 0
+  count                      = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
   name                       = "${var.name}-diag"
   target_resource_id         = azurerm_linux_web_app.this.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
