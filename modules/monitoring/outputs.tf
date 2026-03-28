@@ -35,3 +35,20 @@ output "action_group_id" {
   description = "ID of the Monitor Action Group"
   value       = var.action_group_name != "" ? azurerm_monitor_action_group.this[0].id : null
 }
+
+output "secondary_app_insights_id" {
+  description = "ID of the secondary Application Insights instance"
+  value       = var.deploy_secondary_app_insights ? azurerm_application_insights.secondary[0].id : null
+}
+
+output "secondary_app_insights_instrumentation_key" {
+  description = "Instrumentation key of the secondary Application Insights instance"
+  value       = var.deploy_secondary_app_insights ? azurerm_application_insights.secondary[0].instrumentation_key : null
+  sensitive   = true
+}
+
+output "secondary_app_insights_connection_string" {
+  description = "Connection string of the secondary Application Insights instance"
+  value       = var.deploy_secondary_app_insights ? azurerm_application_insights.secondary[0].connection_string : null
+  sensitive   = true
+}

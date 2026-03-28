@@ -43,6 +43,12 @@ variable "enable_private_dns_zones" {
   default     = true
 }
 
+variable "secondary_vnet_id" {
+  description = "Optional ID of secondary VNet to link to private DNS zones"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

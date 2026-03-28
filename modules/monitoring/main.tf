@@ -59,3 +59,16 @@ resource "azurerm_monitor_metric_alert" "this" {
     }
   }
 }
+
+#--------------------------------------------------------------
+# Secondary Region App Insights (same Log Analytics workspace)
+#--------------------------------------------------------------
+resource "azurerm_application_insights" "secondary" {
+  count               = var.deploy_secondary_app_insights ? 1 : 0
+  name                = var.secondary_app_insights_name
+  location            = var.secondary_location
+  resource_group_name = var.resource_group_name
+  workspace_id        = azurerm_log_analytics_workspace.this.id
+  application_type    = var.app_insights_application_type
+  tags                = var.tags
+}

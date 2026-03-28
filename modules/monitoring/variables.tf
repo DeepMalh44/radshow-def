@@ -87,3 +87,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "deploy_secondary_app_insights" {
+  description = "Whether to deploy a secondary App Insights instance in secondary region"
+  type        = bool
+  default     = false
+}
+
+variable "secondary_location" {
+  description = "Azure region for secondary App Insights (required when deploy_secondary_app_insights = true)"
+  type        = string
+  default     = ""
+}
+
+variable "secondary_app_insights_name" {
+  description = "Name of the secondary Application Insights instance"
+  type        = string
+  default     = ""
+}

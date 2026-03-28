@@ -82,3 +82,14 @@ resource "azurerm_private_dns_zone_virtual_network_link" "this" {
   registration_enabled  = false
   tags                  = var.tags
 }
+
+resource "azurerm_private_dns_zone_virtual_network_link" "secondary" {
+  for_each = var.enable_private_dns_zones && var.secondary_vnet_id != "" ? var.private_dns_zones : {}
+
+  name                  = "link-${each.key}-secondary"
+  resource_group_name   = var.resource_group_name
+  private_dns_zone_name = azurerm_private_dns_zone.this[each.key].name
+  virtual_network_id    = var.secondary_vnet_id
+  registration_enabled  = false
+  tags                  = var.tags
+}
