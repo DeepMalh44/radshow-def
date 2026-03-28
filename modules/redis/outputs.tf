@@ -38,5 +38,5 @@ output "primary_connection_string" {
 
 output "linked_server_id" {
   description = "The resource ID of the geo-replication linked server"
-  value       = var.enable_geo_replication ? azurerm_redis_linked_server.this[0].id : null
+  value       = try(azurerm_redis_linked_server.this[0].id, null)
 }

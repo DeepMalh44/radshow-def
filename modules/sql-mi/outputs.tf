@@ -20,10 +20,10 @@ output "identity_principal_id" {
 
 output "failover_group_id" {
   description = "Resource ID of the failover group (empty if not created)"
-  value       = var.enable_failover_group ? azurerm_mssql_managed_instance_failover_group.this[0].id : ""
+  value       = try(azurerm_mssql_managed_instance_failover_group.this[0].id, "")
 }
 
 output "failover_group_name" {
   description = "Name of the failover group (empty if not created)"
-  value       = var.enable_failover_group ? azurerm_mssql_managed_instance_failover_group.this[0].name : ""
+  value       = try(azurerm_mssql_managed_instance_failover_group.this[0].name, "")
 }
