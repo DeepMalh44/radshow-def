@@ -80,8 +80,8 @@ try {
             $evidence.Components["SqlMiFog_$($pair.Label)"] = @{
                 ReplicationRole  = $fog.ReplicationRole
                 ReplicationState = $fog.ReplicationState
-                PrimaryMI        = $fog.PrimaryManagedInstanceName
-                PartnerMI        = $fog.PartnerManagedInstanceName
+                PrimaryMI        = $fog.ManagedInstanceName
+                PartnerMI        = $fog.PartnerManagedInstanceId.Split('/')[-1]
             }
             Write-Output "  $($pair.Label): Role=$($fog.ReplicationRole), State=$($fog.ReplicationState)"
         }
@@ -124,7 +124,7 @@ Write-Output "[CAPTURE] Front Door Status"
 try {
     $fd = Get-AzFrontDoorCdnProfile `
         -ResourceGroupName $Config.FrontDoorResourceGroup `
-        -ProfileName $Config.FrontDoorProfileName `
+        -Name $Config.FrontDoorProfileName `
         -ErrorAction Stop
 
     $originInfo = @()
@@ -166,11 +166,12 @@ Write-Output ""
 Write-Output "[CAPTURE] Key Vault active-region"
 try {
     $secret = Get-AzKeyVaultSecret -VaultName $Config.KeyVaultName -Name "active-region" -ErrorAction Stop
+    $secretValue = $secret.SecretValue | ConvertFrom-SecureString -AsPlainText
     $evidence.Components["KeyVault"] = @{
-        ActiveRegion = $secret.SecretValueText
+        ActiveRegion = $secretValue
         Updated      = $secret.Updated.ToString("o")
     }
-    Write-Output "  active-region: $($secret.SecretValueText) (updated: $($secret.Updated))"
+    Write-Output "  active-region: $secretValue (updated: $($secret.Updated))"
 }
 catch {
     Write-Warning "  Key Vault capture failed: $($_.Exception.Message)"

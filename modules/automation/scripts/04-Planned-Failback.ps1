@@ -94,6 +94,7 @@ if (-not $DryRun) {
     $maxWait = 300
     $elapsed = 0
     $interval = 15
+    $synced = $false
 
     do {
         Start-Sleep -Seconds $interval
@@ -110,6 +111,7 @@ if (-not $DryRun) {
 
             if ($fog.ReplicationRole -eq "Primary") {
                 Write-Output "  [OK] Primary region restored as Primary role"
+                $synced = $true
                 break
             }
         }
@@ -118,12 +120,15 @@ if (-not $DryRun) {
         }
     } while ($elapsed -lt $maxWait)
 }
+else {
+    $synced = $true
+}
 
 $stepResults += @{
     Step     = "Replication Sync"
-    Status   = "Success"
+    Status   = if ($synced) { "Success" } else { "TimedOut" }
     Duration = ((Get-Date) - $stepStart).TotalSeconds
-    Detail   = "Sync completed"
+    Detail   = if ($synced) { "Sync completed" } else { "Timed out after ${maxWait}s" }
 }
 
 Write-Output ""

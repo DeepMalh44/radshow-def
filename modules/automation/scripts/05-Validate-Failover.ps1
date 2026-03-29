@@ -140,19 +140,20 @@ Write-Output ""
 Write-Output "[VALIDATE] Key Vault active-region"
 try {
     $secret = Get-AzKeyVaultSecret -VaultName $Config.KeyVaultName -Name "active-region" -ErrorAction Stop
-    $regionCorrect = $secret.SecretValueText -eq $expectedPrimary
+    $secretValue = $secret.SecretValue | ConvertFrom-SecureString -AsPlainText
+    $regionCorrect = $secretValue -eq $expectedPrimary
 
     $validationResults += @{
         Check  = "KV active-region"
         Pass   = $regionCorrect
-        Detail = "Value=$($secret.SecretValueText), Expected=$expectedPrimary"
+        Detail = "Value=$secretValue, Expected=$expectedPrimary"
     }
 
     if ($regionCorrect) {
-        Write-Output "  [PASS] active-region=$($secret.SecretValueText)"
+        Write-Output "  [PASS] active-region=$secretValue"
     }
     else {
-        Write-Warning "  [FAIL] active-region=$($secret.SecretValueText), expected $expectedPrimary"
+        Write-Warning "  [FAIL] active-region=$secretValue, expected $expectedPrimary"
     }
 }
 catch {

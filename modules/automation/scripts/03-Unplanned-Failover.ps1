@@ -95,6 +95,7 @@ if (-not $DryRun) {
     $maxWait = 600  # 10 minutes for forced failover
     $elapsed = 0
     $interval = 15
+    $synced = $false
 
     do {
         Start-Sleep -Seconds $interval
@@ -109,6 +110,7 @@ if (-not $DryRun) {
 
             if ($fog -and $fog.ReplicationRole -eq "Primary") {
                 Write-Output "  [$elapsed s] Secondary now Primary"
+                $synced = $true
                 break
             }
             Write-Output "  [$elapsed s] Waiting... Role=$($fog.ReplicationRole)"
@@ -118,12 +120,15 @@ if (-not $DryRun) {
         }
     } while ($elapsed -lt $maxWait)
 }
+else {
+    $synced = $true
+}
 
 $stepResults += @{
     Step     = "Role Switch Wait"
-    Status   = "Success"
+    Status   = if ($synced) { "Success" } else { "TimedOut" }
     Duration = ((Get-Date) - $stepStart).TotalSeconds
-    Detail   = "Role switch confirmed"
+    Detail   = if ($synced) { "Role switch confirmed" } else { "Timed out after ${maxWait}s" }
 }
 
 Write-Output ""

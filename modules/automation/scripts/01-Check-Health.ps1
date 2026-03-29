@@ -37,7 +37,7 @@ try {
         -Name $Config.SqlMiFailoverGroupName `
         -ErrorAction Stop
 
-    $fogHealthy = $fog.ReplicationState -eq "CATCH_UP" -or $fog.ReplicationState -eq "SEEDING"
+    $fogHealthy = $fog.ReplicationState -eq "CATCH_UP"
     $results += @{
         Component = "SQL MI FOG"
         Status    = if ($fogHealthy) { "Healthy" } else { "Warning" }
@@ -45,8 +45,8 @@ try {
     }
     Write-Output "  Role: $($fog.ReplicationRole)"
     Write-Output "  Replication State: $($fog.ReplicationState)"
-    Write-Output "  Primary MI: $($fog.PrimaryManagedInstanceName)"
-    Write-Output "  Partner MI: $($fog.PartnerManagedInstanceName)"
+    Write-Output "  Primary MI: $($fog.ManagedInstanceName)"
+    Write-Output "  Partner MI: $($fog.PartnerManagedInstanceId.Split('/')[-1])"
 }
 catch {
     $results += @{ Component = "SQL MI FOG"; Status = "Error"; Detail = $_.Exception.Message }
@@ -87,7 +87,7 @@ Write-Output "[CHECK] Front Door: $($Config.FrontDoorProfileName)"
 try {
     $fd = Get-AzFrontDoorCdnProfile `
         -ResourceGroupName $Config.FrontDoorResourceGroup `
-        -ProfileName $Config.FrontDoorProfileName `
+        -Name $Config.FrontDoorProfileName `
         -ErrorAction Stop
 
     $results += @{
@@ -111,7 +111,7 @@ try {
     $kv = Get-AzKeyVault -VaultName $Config.KeyVaultName -ResourceGroupName $Config.KeyVaultResourceGroup -ErrorAction Stop
 
     $activeRegion = (Get-AzKeyVaultSecret -VaultName $Config.KeyVaultName -Name "active-region" -ErrorAction SilentlyContinue)
-    $activeRegionValue = if ($activeRegion) { $activeRegion.SecretValueText } else { "not set" }
+    $activeRegionValue = if ($activeRegion) { $activeRegion.SecretValue | ConvertFrom-SecureString -AsPlainText } else { "not set" }
 
     $results += @{
         Component = "Key Vault"
