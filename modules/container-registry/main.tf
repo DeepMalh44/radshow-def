@@ -29,14 +29,6 @@ resource "azurerm_container_registry" "this" {
           ip_range = ip_rule.value.ip_range
         }
       }
-
-      dynamic "virtual_network" {
-        for_each = network_rule_set.value.virtual_network_rules != null ? network_rule_set.value.virtual_network_rules : []
-        content {
-          action    = virtual_network.value.action
-          subnet_id = virtual_network.value.subnet_id
-        }
-      }
     }
   }
 

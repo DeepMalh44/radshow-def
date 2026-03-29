@@ -163,7 +163,7 @@ variable "waf_custom_rules" {
       match_variable   = string
       operator         = string
       match_values     = list(string)
-      negate_condition = optional(bool, false)
+      negation_condition = optional(bool, false)
       selector         = optional(string)
       transforms       = optional(list(string), [])
     }))

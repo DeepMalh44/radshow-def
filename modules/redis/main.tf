@@ -5,7 +5,7 @@ resource "azurerm_redis_cache" "this" {
   capacity                      = var.capacity
   family                        = var.family
   sku_name                      = var.sku_name
-  enable_non_ssl_port           = var.enable_non_ssl_port
+  non_ssl_port_enabled           = var.non_ssl_port_enabled
   minimum_tls_version           = var.minimum_tls_version
   shard_count                   = var.sku_name == "Premium" ? var.shard_count : 0
   replicas_per_primary          = var.replicas_per_primary

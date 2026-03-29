@@ -15,7 +15,7 @@ output "fqdn" {
 
 output "identity_principal_id" {
   description = "Principal ID of the SQL MI system-assigned managed identity"
-  value       = try(azapi_resource.sql_mi.identity.principal_id, "")
+  value       = try(azapi_resource.sql_mi.identity[0].principal_id, "")
 }
 
 output "failover_group_id" {

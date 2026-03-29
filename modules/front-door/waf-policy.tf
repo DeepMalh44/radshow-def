@@ -70,7 +70,7 @@ resource "azurerm_cdn_frontdoor_firewall_policy" "this" {
           match_variable   = match_condition.value.match_variable
           operator         = match_condition.value.operator
           match_values     = match_condition.value.match_values
-          negate_condition = match_condition.value.negate_condition
+          negation_condition = match_condition.value.negation_condition
           selector         = match_condition.value.selector
           transforms       = match_condition.value.transforms
         }

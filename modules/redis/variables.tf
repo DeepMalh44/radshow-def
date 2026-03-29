@@ -31,7 +31,7 @@ variable "sku_name" {
   default     = "Premium"
 }
 
-variable "enable_non_ssl_port" {
+variable "non_ssl_port_enabled" {
   description = "Enable the non-SSL port (6379). Not recommended for production."
   type        = bool
   default     = false

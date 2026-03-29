@@ -54,7 +54,7 @@ variable "public_network_access_enabled" {
   default     = false
 }
 
-variable "enable_https_traffic_only" {
+variable "https_traffic_only_enabled" {
   description = "Force HTTPS traffic only"
   type        = bool
   default     = true
