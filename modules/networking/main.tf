@@ -43,6 +43,47 @@ resource "azurerm_subnet_network_security_group_association" "this" {
   network_security_group_id = azurerm_network_security_group.this[each.key].id
 }
 
+#--------------------------------------------------------------
+# APIM NSG Rules for VNet Internal Mode
+# Port 3443: Management plane (ApiManagement service tag)
+# Port 6390: Azure Load Balancer health probe
+#--------------------------------------------------------------
+locals {
+  apim_subnets = { for k, v in var.subnets : k => v if v.is_apim_subnet }
+}
+
+resource "azurerm_network_security_rule" "apim_management_3443" {
+  for_each = local.apim_subnets
+
+  name                        = "Allow_APIM_Management_3443"
+  priority                    = 110
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "3443"
+  source_address_prefix       = "ApiManagement"
+  destination_address_prefix  = "VirtualNetwork"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
+resource "azurerm_network_security_rule" "apim_loadbalancer_6390" {
+  for_each = local.apim_subnets
+
+  name                        = "Allow_APIM_LoadBalancer_6390"
+  priority                    = 120
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "6390"
+  source_address_prefix       = "AzureLoadBalancer"
+  destination_address_prefix  = "VirtualNetwork"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
 locals {
   sqlmi_subnets = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
 }

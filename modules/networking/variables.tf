@@ -27,6 +27,7 @@ variable "subnets" {
       actions = list(string)
     }))
     is_sqlmi_subnet   = optional(bool, false)
+    is_apim_subnet    = optional(bool, false)
     service_endpoints = optional(list(string), [])
   }))
 }
