@@ -1,14 +1,3 @@
-terraform {
-  required_providers {
-    azapi = {
-      source = "Azure/azapi"
-    }
-    azurerm = {
-      source = "hashicorp/azurerm"
-    }
-  }
-}
-
 locals {
   sku_parts = split("_", var.sku_name)
   sku_tier  = local.sku_parts[0] == "GP" ? "GeneralPurpose" : local.sku_parts[0] == "BC" ? "BusinessCritical" : "GeneralPurpose"
