@@ -1,0 +1,155 @@
+name: Validate Terraform Modules
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'modules/**'
+  push:
+    branches: [main]
+    paths:
+      - 'modules/**'
+  workflow_dispatch:
+    inputs:
+      tag_version:
+        description: 'Semver tag to create (e.g. v1.1.0). Leave empty for validation only.'
+        required: false
+        type: string
+
+permissions:
+  contents: write        # Needed for tagging
+  pull-requests: write   # Needed for PR comments
+  id-token: write        # OIDC for Azure
+
+env:
+  TF_VERSION: "1.5.7"
+
+jobs:
+  validate:
+    name: Validate Modules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive modules/
+        continue-on-error: true
+
+      - name: Validate All Modules
+        id: validate
+        run: |
+          EXIT_CODE=0
+          RESULTS=""
+          for MODULE_DIR in modules/*/; do
+            MODULE_NAME=$(basename "$MODULE_DIR")
+            echo "::group::Validating $MODULE_NAME"
+
+            cd "$MODULE_DIR"
+            terraform init -backend=false > /dev/null 2>&1
+            INIT_EXIT=$?
+
+            if [ $INIT_EXIT -ne 0 ]; then
+              echo "::error::$MODULE_NAME — init failed"
+              RESULTS="${RESULTS}| ${MODULE_NAME} | :x: init failed |\n"
+              EXIT_CODE=1
+              cd "$GITHUB_WORKSPACE"
+              echo "::endgroup::"
+              continue
+            fi
+
+            VALIDATE_OUTPUT=$(terraform validate 2>&1)
+            VALIDATE_EXIT=$?
+
+            if [ $VALIDATE_EXIT -ne 0 ]; then
+              echo "::error::$MODULE_NAME — validation failed"
+              echo "$VALIDATE_OUTPUT"
+              RESULTS="${RESULTS}| ${MODULE_NAME} | :x: ${VALIDATE_OUTPUT//$'\n'/ } |\n"
+              EXIT_CODE=1
+            else
+              echo "$MODULE_NAME — valid"
+              RESULTS="${RESULTS}| ${MODULE_NAME} | :white_check_mark: valid |\n"
+            fi
+
+            cd "$GITHUB_WORKSPACE"
+            echo "::endgroup::"
+          done
+
+          echo "results<<EOF" >> "$GITHUB_OUTPUT"
+          echo -e "$RESULTS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          exit $EXIT_CODE
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        env:
+          FMT_OUTCOME: ${{ steps.fmt.outcome }}
+          VALIDATE_RESULTS: ${{ steps.validate.outputs.results }}
+        with:
+          script: |
+            const fmt = process.env.FMT_OUTCOME === 'success' ? ':white_check_mark: Passed' : ':x: Failed — run `terraform fmt -recursive modules/`';
+            const results = process.env.VALIDATE_RESULTS || '';
+            const body = [
+              '### Terraform Module Validation',
+              '',
+              `**Format Check:** ${fmt}`,
+              '',
+              '| Module | Status |',
+              '|--------|--------|',
+              results,
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  tag-release:
+    name: Create Release Tag
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.tag_version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Tag Format
+        run: |
+          TAG="${{ inputs.tag_version }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid tag format '$TAG'. Must be vX.Y.Z (e.g. v1.1.0)"
+            exit 1
+          fi
+
+      - name: Check Tag Does Not Exist
+        run: |
+          if git rev-parse "${{ inputs.tag_version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ inputs.tag_version }} already exists"
+            exit 1
+          fi
+
+      - name: Create and Push Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ inputs.tag_version }}" -m "Release ${{ inputs.tag_version }}"
+          git push origin "${{ inputs.tag_version }}"
+
+      - name: Summary
+        run: |
+          echo "### :rocket: Tagged ${{ inputs.tag_version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "PRD01 can now reference this tag in \`_envcommon/*.hcl\` files:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "source = \"git::https://github.com/DeepMalh44/radshow-def.git//modules/<module>?ref=${{ inputs.tag_version }}\"" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
