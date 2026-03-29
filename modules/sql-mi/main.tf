@@ -1,11 +1,12 @@
 locals {
-  sku_parts = split("_", var.sku_name)
-  sku_tier  = local.sku_parts[0] == "GP" ? "GeneralPurpose" : local.sku_parts[0] == "BC" ? "BusinessCritical" : "GeneralPurpose"
+  sku_parts  = split("_", var.sku_name)
+  sku_tier   = local.sku_parts[0] == "GP" ? "GeneralPurpose" : local.sku_parts[0] == "BC" ? "BusinessCritical" : "GeneralPurpose"
   sku_family = length(local.sku_parts) > 1 ? local.sku_parts[1] : "Gen5"
 }
 
 # -------------------------------------------------------------------
 # SQL Managed Instance via azapi_resource
+# Uses Microsoft Entra-only authentication (MCAPS policy requirement)
 # -------------------------------------------------------------------
 resource "azapi_resource" "sql_mi" {
   type      = "Microsoft.Sql/managedInstances@2023-08-01-preview"
@@ -23,34 +24,27 @@ resource "azapi_resource" "sql_mi" {
       tier   = local.sku_tier
       family = local.sku_family
     }
-    properties = merge(
-      {
-        subnetId                   = var.subnet_id
-        licenseType                = var.license_type
-        vCores                     = var.vcores
-        storageSizeInGB            = var.storage_size_in_gb
-        collation                  = var.collation
-        timezoneId                 = var.timezone_id
-        minimalTlsVersion          = var.minimum_tls_version
-        publicDataEndpointEnabled  = var.public_data_endpoint_enabled
-        proxyOverride              = var.proxy_override
-        zoneRedundant              = var.zone_redundant
-        maintenanceConfigurationId = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/${var.maintenance_configuration_name}"
-      },
-      var.entra_only_auth ? {
-        administrators = {
-          administratorType         = "ActiveDirectory"
-          azureADOnlyAuthentication = true
-          login                     = var.entra_admin_login
-          sid                       = var.entra_admin_object_id
-          tenantId                  = var.entra_admin_tenant_id
-          principalType             = var.entra_admin_principal_type
-        }
-      } : {
-        administratorLogin         = var.administrator_login
-        administratorLoginPassword = var.administrator_login_password
+    properties = {
+      subnetId                   = var.subnet_id
+      licenseType                = var.license_type
+      vCores                     = var.vcores
+      storageSizeInGB            = var.storage_size_in_gb
+      collation                  = var.collation
+      timezoneId                 = var.timezone_id
+      minimalTlsVersion          = var.minimum_tls_version
+      publicDataEndpointEnabled  = var.public_data_endpoint_enabled
+      proxyOverride              = var.proxy_override
+      zoneRedundant              = var.zone_redundant
+      maintenanceConfigurationId = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/${var.maintenance_configuration_name}"
+      administrators = {
+        administratorType         = "ActiveDirectory"
+        azureADOnlyAuthentication = true
+        login                     = var.entra_admin_login
+        sid                       = var.entra_admin_object_id
+        tenantId                  = var.entra_admin_tenant_id
+        principalType             = var.entra_admin_principal_type
       }
-    )
+    }
   }
 
   tags = var.tags
