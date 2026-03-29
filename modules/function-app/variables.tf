@@ -65,6 +65,12 @@ variable "health_check_path" {
   default     = "/api/healthz"
 }
 
+variable "health_check_eviction_time_in_min" {
+  description = "Time in minutes after which unhealthy instances are evicted"
+  type        = number
+  default     = 2
+}
+
 variable "vnet_integration_subnet_id" {
   description = "Subnet ID for VNet integration"
   type        = string

@@ -19,9 +19,10 @@ resource "azurerm_linux_web_app" "this" {
   virtual_network_subnet_id = var.vnet_integration_subnet_id
 
   site_config {
-    always_on              = var.always_on
-    health_check_path      = var.health_check_path
-    ftps_state             = "Disabled"
+    always_on                         = var.always_on
+    health_check_path                 = var.health_check_path
+    health_check_eviction_time_in_min = var.health_check_eviction_time_in_min
+    ftps_state                        = "Disabled"
     http2_enabled          = true
     minimum_tls_version    = "1.2"
 
@@ -80,9 +81,10 @@ resource "azurerm_linux_web_app_slot" "staging" {
   app_service_id = azurerm_linux_web_app.this.id
 
   site_config {
-    always_on              = var.always_on
-    health_check_path      = var.health_check_path
-    ftps_state             = "Disabled"
+    always_on                         = var.always_on
+    health_check_path                 = var.health_check_path
+    health_check_eviction_time_in_min = var.health_check_eviction_time_in_min
+    ftps_state                        = "Disabled"
     http2_enabled          = true
     minimum_tls_version    = "1.2"
 
