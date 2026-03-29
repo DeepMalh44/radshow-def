@@ -31,6 +31,12 @@ variable "user_assigned_identity_ids" {
   default     = null
 }
 
+variable "enable_dr_runbooks" {
+  description = "Enable bundled DR drill runbook scripts from modules/automation/scripts/"
+  type        = bool
+  default     = false
+}
+
 variable "runbooks" {
   description = "Map of runbooks to create in the Automation Account"
   type = map(object({

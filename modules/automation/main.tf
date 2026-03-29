@@ -1,3 +1,66 @@
+locals {
+  bundled_runbooks = var.enable_dr_runbooks ? {
+    "Invoke-DRFailover" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "DR Failover Runbook - orchestrates SQL MI FOG switch, Front Door priority swap, Key Vault update"
+      content      = file("${path.module}/scripts/Invoke-DRFailover.ps1")
+      uri          = null
+    }
+    "DR-Check-Health" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Pre-drill health check for all DR components"
+      content      = file("${path.module}/scripts/01-Check-Health.ps1")
+      uri          = null
+    }
+    "DR-Planned-Failover" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Planned failover with zero data loss"
+      content      = file("${path.module}/scripts/02-Planned-Failover.ps1")
+      uri          = null
+    }
+    "DR-Unplanned-Failover" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Unplanned failover simulation with AllowDataLoss"
+      content      = file("${path.module}/scripts/03-Unplanned-Failover.ps1")
+      uri          = null
+    }
+    "DR-Planned-Failback" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Planned failback to primary region"
+      content      = file("${path.module}/scripts/04-Planned-Failback.ps1")
+      uri          = null
+    }
+    "DR-Validate-Failover" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Post-failover validation of all components"
+      content      = file("${path.module}/scripts/05-Validate-Failover.ps1")
+      uri          = null
+    }
+    "DR-Capture-Evidence" = {
+      runbook_type = "PowerShell"
+      log_verbose  = true
+      log_progress = true
+      description  = "Capture DR drill evidence for compliance"
+      content      = file("${path.module}/scripts/06-Capture-Evidence.ps1")
+      uri          = null
+    }
+  } : {}
+
+  all_runbooks = merge(local.bundled_runbooks, var.runbooks)
+}
+
 resource "azurerm_automation_account" "this" {
   name                = var.name
   location            = var.location
@@ -12,7 +75,7 @@ resource "azurerm_automation_account" "this" {
 }
 
 resource "azurerm_automation_runbook" "this" {
-  for_each = var.runbooks
+  for_each = local.all_runbooks
 
   name                    = each.key
   location                = azurerm_automation_account.this.location

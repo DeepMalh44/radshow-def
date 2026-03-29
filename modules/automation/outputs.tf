@@ -23,3 +23,8 @@ output "dsc_primary_access_key" {
   value       = azurerm_automation_account.this.dsc_primary_access_key
   sensitive   = true
 }
+
+output "runbook_names" {
+  description = "Names of all deployed runbooks"
+  value       = [for k, v in azurerm_automation_runbook.this : v.name]
+}

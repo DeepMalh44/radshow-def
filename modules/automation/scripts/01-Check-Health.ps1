@@ -1,0 +1,175 @@
+<#
+.SYNOPSIS
+    Pre-Drill Health Check - Validates all DR components before failover
+.DESCRIPTION
+    Checks health of SQL MI FOG replication, Redis geo-replication,
+    Front Door health probe status, and Key Vault accessibility.
+.NOTES
+    Version: 1.0.0
+    Requires: 00-Setup-Environment.ps1 executed first (or pass config)
+#>
+
+param(
+    [Parameter(Mandatory = $false)]
+    [hashtable]$Config = $global:DrConfig
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not $Config) {
+    Write-Error "Configuration not found. Run 00-Setup-Environment.ps1 first."
+    throw
+}
+
+$results = @()
+
+Write-Output "============================================"
+Write-Output "  RAD Showcase DR Drill - Health Check"
+Write-Output "============================================"
+Write-Output ""
+
+# ── 1. SQL MI Failover Group ────────────────────────────────────────────────
+Write-Output "[CHECK] SQL MI Failover Group: $($Config.SqlMiFailoverGroupName)"
+try {
+    $fog = Get-AzSqlDatabaseInstanceFailoverGroup `
+        -ResourceGroupName $Config.PrimaryResourceGroup `
+        -Location $Config.PrimaryRegion `
+        -Name $Config.SqlMiFailoverGroupName `
+        -ErrorAction Stop
+
+    $fogHealthy = $fog.ReplicationState -eq "CATCH_UP" -or $fog.ReplicationState -eq "SEEDING"
+    $results += @{
+        Component = "SQL MI FOG"
+        Status    = if ($fogHealthy) { "Healthy" } else { "Warning" }
+        Detail    = "Role=$($fog.ReplicationRole), State=$($fog.ReplicationState)"
+    }
+    Write-Output "  Role: $($fog.ReplicationRole)"
+    Write-Output "  Replication State: $($fog.ReplicationState)"
+    Write-Output "  Primary MI: $($fog.PrimaryManagedInstanceName)"
+    Write-Output "  Partner MI: $($fog.PartnerManagedInstanceName)"
+}
+catch {
+    $results += @{ Component = "SQL MI FOG"; Status = "Error"; Detail = $_.Exception.Message }
+    Write-Warning "  SQL MI FOG check failed: $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 2. Redis Geo-Replication ────────────────────────────────────────────────
+Write-Output "[CHECK] Redis Geo-Replication"
+try {
+    $redisPrimary = Get-AzRedisCache -ResourceGroupName $Config.PrimaryResourceGroup -Name $Config.RedisPrimaryName -ErrorAction Stop
+    $redisSecondary = Get-AzRedisCache -ResourceGroupName $Config.SecondaryResourceGroup -Name $Config.RedisSecondaryName -ErrorAction Stop
+
+    $results += @{
+        Component = "Redis Primary"
+        Status    = if ($redisPrimary.ProvisioningState -eq "Succeeded") { "Healthy" } else { "Warning" }
+        Detail    = "State=$($redisPrimary.ProvisioningState), Host=$($redisPrimary.HostName)"
+    }
+    $results += @{
+        Component = "Redis Secondary"
+        Status    = if ($redisSecondary.ProvisioningState -eq "Succeeded") { "Healthy" } else { "Warning" }
+        Detail    = "State=$($redisSecondary.ProvisioningState), Host=$($redisSecondary.HostName)"
+    }
+
+    Write-Output "  Primary: $($redisPrimary.HostName) ($($redisPrimary.ProvisioningState))"
+    Write-Output "  Secondary: $($redisSecondary.HostName) ($($redisSecondary.ProvisioningState))"
+}
+catch {
+    $results += @{ Component = "Redis"; Status = "Error"; Detail = $_.Exception.Message }
+    Write-Warning "  Redis check failed: $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 3. Front Door ───────────────────────────────────────────────────────────
+Write-Output "[CHECK] Front Door: $($Config.FrontDoorProfileName)"
+try {
+    $fd = Get-AzFrontDoorCdnProfile `
+        -ResourceGroupName $Config.FrontDoorResourceGroup `
+        -ProfileName $Config.FrontDoorProfileName `
+        -ErrorAction Stop
+
+    $results += @{
+        Component = "Front Door"
+        Status    = if ($fd.ProvisioningState -eq "Succeeded") { "Healthy" } else { "Warning" }
+        Detail    = "State=$($fd.ProvisioningState), SKU=$($fd.SkuName)"
+    }
+    Write-Output "  Provisioning State: $($fd.ProvisioningState)"
+    Write-Output "  SKU: $($fd.SkuName)"
+}
+catch {
+    $results += @{ Component = "Front Door"; Status = "Error"; Detail = $_.Exception.Message }
+    Write-Warning "  Front Door check failed: $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 4. Key Vault ────────────────────────────────────────────────────────────
+Write-Output "[CHECK] Key Vault: $($Config.KeyVaultName)"
+try {
+    $kv = Get-AzKeyVault -VaultName $Config.KeyVaultName -ResourceGroupName $Config.KeyVaultResourceGroup -ErrorAction Stop
+
+    $activeRegion = (Get-AzKeyVaultSecret -VaultName $Config.KeyVaultName -Name "active-region" -ErrorAction SilentlyContinue)
+    $activeRegionValue = if ($activeRegion) { $activeRegion.SecretValueText } else { "not set" }
+
+    $results += @{
+        Component = "Key Vault"
+        Status    = "Healthy"
+        Detail    = "ActiveRegion=$activeRegionValue"
+    }
+    Write-Output "  Vault URI: $($kv.VaultUri)"
+    Write-Output "  Active Region: $activeRegionValue"
+}
+catch {
+    $results += @{ Component = "Key Vault"; Status = "Error"; Detail = $_.Exception.Message }
+    Write-Warning "  Key Vault check failed: $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 5. Function Apps ────────────────────────────────────────────────────────
+Write-Output "[CHECK] Function Apps"
+foreach ($name in @($Config.FuncAppPrimaryName, $Config.FuncAppSecondaryName)) {
+    $rg = if ($name -match "scus") { $Config.PrimaryResourceGroup } else { $Config.SecondaryResourceGroup }
+    try {
+        $app = Get-AzFunctionApp -ResourceGroupName $rg -Name $name -ErrorAction Stop
+        $results += @{
+            Component = "FuncApp: $name"
+            Status    = if ($app.State -eq "Running") { "Healthy" } else { "Warning" }
+            Detail    = "State=$($app.State)"
+        }
+        Write-Output "  $name : $($app.State)"
+    }
+    catch {
+        $results += @{ Component = "FuncApp: $name"; Status = "Error"; Detail = $_.Exception.Message }
+        Write-Warning "  $name : $($_.Exception.Message)"
+    }
+}
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+Write-Output ""
+Write-Output "============================================"
+Write-Output "  Health Check Summary"
+Write-Output "============================================"
+
+$healthy = ($results | Where-Object { $_.Status -eq "Healthy" }).Count
+$warnings = ($results | Where-Object { $_.Status -eq "Warning" }).Count
+$errors = ($results | Where-Object { $_.Status -eq "Error" }).Count
+
+Write-Output "  Healthy:  $healthy"
+Write-Output "  Warnings: $warnings"
+Write-Output "  Errors:   $errors"
+Write-Output ""
+
+if ($errors -gt 0) {
+    Write-Warning "[FAIL] Health check found errors. Fix before proceeding with DR drill."
+}
+elseif ($warnings -gt 0) {
+    Write-Warning "[WARN] Health check has warnings. Review before proceeding."
+}
+else {
+    Write-Output "[SUCCESS] All components healthy. Ready for DR drill."
+}
+
+$global:HealthCheckResults = $results
