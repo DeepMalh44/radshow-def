@@ -19,14 +19,46 @@ variable "subnet_id" {
 }
 
 variable "administrator_login" {
-  description = "Administrator login name for the SQL MI"
+  description = "Administrator login name for the SQL MI (ignored if entra_only_auth = true)"
   type        = string
+  default     = ""
 }
 
 variable "administrator_login_password" {
-  description = "Administrator login password for the SQL MI"
+  description = "Administrator login password for the SQL MI (ignored if entra_only_auth = true)"
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "entra_only_auth" {
+  description = "Whether to use Microsoft Entra-only authentication (required by MCAPS policy)"
+  type        = bool
+  default     = true
+}
+
+variable "entra_admin_login" {
+  description = "Display name / login of the Entra admin for SQL MI"
+  type        = string
+  default     = ""
+}
+
+variable "entra_admin_object_id" {
+  description = "Object ID of the Entra admin user or group"
+  type        = string
+  default     = ""
+}
+
+variable "entra_admin_tenant_id" {
+  description = "Tenant ID for the Entra admin"
+  type        = string
+  default     = ""
+}
+
+variable "entra_admin_principal_type" {
+  description = "Principal type for the Entra admin (User, Group, Application)"
+  type        = string
+  default     = "User"
 }
 
 variable "sku_name" {

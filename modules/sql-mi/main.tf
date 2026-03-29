@@ -23,21 +23,34 @@ resource "azapi_resource" "sql_mi" {
       tier   = local.sku_tier
       family = local.sku_family
     }
-    properties = {
-      administratorLogin         = var.administrator_login
-      administratorLoginPassword = var.administrator_login_password
-      subnetId                   = var.subnet_id
-      licenseType                = var.license_type
-      vCores                     = var.vcores
-      storageSizeInGB            = var.storage_size_in_gb
-      collation                  = var.collation
-      timezoneId                 = var.timezone_id
-      minimalTlsVersion          = var.minimum_tls_version
-      publicDataEndpointEnabled  = var.public_data_endpoint_enabled
-      proxyOverride              = var.proxy_override
-      zoneRedundant              = var.zone_redundant
-      maintenanceConfigurationId = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/${var.maintenance_configuration_name}"
-    }
+    properties = merge(
+      {
+        subnetId                   = var.subnet_id
+        licenseType                = var.license_type
+        vCores                     = var.vcores
+        storageSizeInGB            = var.storage_size_in_gb
+        collation                  = var.collation
+        timezoneId                 = var.timezone_id
+        minimalTlsVersion          = var.minimum_tls_version
+        publicDataEndpointEnabled  = var.public_data_endpoint_enabled
+        proxyOverride              = var.proxy_override
+        zoneRedundant              = var.zone_redundant
+        maintenanceConfigurationId = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/providers/Microsoft.Maintenance/publicMaintenanceConfigurations/${var.maintenance_configuration_name}"
+      },
+      var.entra_only_auth ? {
+        administrators = {
+          administratorType         = "ActiveDirectory"
+          azureADOnlyAuthentication = true
+          login                     = var.entra_admin_login
+          sid                       = var.entra_admin_object_id
+          tenantId                  = var.entra_admin_tenant_id
+          principalType             = var.entra_admin_principal_type
+        }
+      } : {
+        administratorLogin         = var.administrator_login
+        administratorLoginPassword = var.administrator_login_password
+      }
+    )
   }
 
   tags = var.tags
