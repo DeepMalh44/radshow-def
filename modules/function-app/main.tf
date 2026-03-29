@@ -15,9 +15,10 @@ resource "azurerm_linux_function_app" "this" {
   resource_group_name = var.resource_group_name
   service_plan_id     = azurerm_service_plan.this.id
 
-  storage_account_name       = var.storage_account_name
-  storage_account_access_key = var.storage_account_access_key
-  builtin_logging_enabled    = false
+  storage_account_name          = var.storage_account_name
+  storage_account_access_key    = var.storage_uses_managed_identity ? null : var.storage_account_access_key
+  storage_uses_managed_identity = var.storage_uses_managed_identity
+  builtin_logging_enabled       = false
 
   https_only                    = true
   virtual_network_subnet_id     = var.vnet_integration_subnet_id
@@ -50,6 +51,23 @@ resource "azurerm_linux_function_app" "this" {
   }
 
   tags = var.tags
+}
+
+# ---------------------------------------------------------
+# RBAC: grant Function App MI access to its runtime storage
+# ---------------------------------------------------------
+resource "azurerm_role_assignment" "func_storage_blob" {
+  count                = var.storage_uses_managed_identity && var.storage_account_id != null ? 1 : 0
+  scope                = var.storage_account_id
+  role_definition_name = "Storage Blob Data Owner"
+  principal_id         = azurerm_linux_function_app.this.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "func_storage_queue" {
+  count                = var.storage_uses_managed_identity && var.storage_account_id != null ? 1 : 0
+  scope                = var.storage_account_id
+  role_definition_name = "Storage Queue Data Contributor"
+  principal_id         = azurerm_linux_function_app.this.identity[0].principal_id
 }
 
 resource "azurerm_monitor_diagnostic_setting" "this" {

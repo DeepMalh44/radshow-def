@@ -36,9 +36,22 @@ variable "storage_account_name" {
 }
 
 variable "storage_account_access_key" {
-  description = "Access key for the storage account"
+  description = "Access key for the storage account (not required when storage_uses_managed_identity is true)"
   type        = string
   sensitive   = true
+  default     = null
+}
+
+variable "storage_uses_managed_identity" {
+  description = "Whether to use Managed Identity for the Function App storage account access instead of an access key"
+  type        = bool
+  default     = false
+}
+
+variable "storage_account_id" {
+  description = "Resource ID of the storage account (required when storage_uses_managed_identity is true, for RBAC assignment)"
+  type        = string
+  default     = null
 }
 
 variable "dotnet_version" {
