@@ -84,6 +84,42 @@ resource "azurerm_network_security_rule" "apim_loadbalancer_6390" {
   network_security_group_name = azurerm_network_security_group.this[each.key].name
 }
 
+#--------------------------------------------------------------
+# APIM NSG Rules for HTTPS (443) - Front Door & Internet access
+# Required for External VNet mode: AFD → APIM gateway traffic
+#--------------------------------------------------------------
+resource "azurerm_network_security_rule" "apim_frontdoor_443" {
+  for_each = local.apim_subnets
+
+  name                        = "Allow_FrontDoor_HTTPS_443"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "AzureFrontDoor.Backend"
+  destination_address_prefix  = "VirtualNetwork"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
+resource "azurerm_network_security_rule" "apim_internet_443" {
+  for_each = local.apim_subnets
+
+  name                        = "Allow_Internet_HTTPS_443"
+  priority                    = 105
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "Internet"
+  destination_address_prefix  = "VirtualNetwork"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
 locals {
   sqlmi_subnets = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
 }
