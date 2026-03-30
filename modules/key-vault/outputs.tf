@@ -17,3 +17,8 @@ output "tenant_id" {
   description = "The tenant ID of the Key Vault."
   value       = azurerm_key_vault.this.tenant_id
 }
+
+output "lock_id" {
+  description = "Resource ID of the management lock (empty if not enabled)"
+  value       = try(azurerm_management_lock.this[0].id, "")
+}

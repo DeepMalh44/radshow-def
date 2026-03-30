@@ -57,6 +57,19 @@ variable "action_group_email_receivers" {
   default = []
 }
 
+variable "dr_automation_webhook_receivers" {
+  description = "List of Automation Runbook receivers for dual-AA DR failover. Deploy two entries (primary + secondary AA) for resilience."
+  type = list(object({
+    name                  = string
+    automation_account_id = string
+    runbook_name          = string
+    webhook_resource_id   = string
+    is_global_runbook     = bool
+    service_uri           = string
+  }))
+  default = []
+}
+
 variable "enable_dr_alerts" {
   description = "Whether to enable DR metric alerts"
   type        = bool

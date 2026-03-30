@@ -80,6 +80,18 @@ resource "azurerm_mssql_managed_instance_failover_group" "this" {
 # -------------------------------------------------------------------
 # Diagnostic Settings (conditional)
 # -------------------------------------------------------------------
+#--------------------------------------------------------------
+# Resource Lock - Prevents accidental deletion in PRD (IR-02)
+#--------------------------------------------------------------
+resource "azurerm_management_lock" "this" {
+  count = var.enable_delete_lock ? 1 : 0
+
+  name       = "lock-${var.name}"
+  scope      = azapi_resource.sql_mi.id
+  lock_level = "CanNotDelete"
+  notes      = "Protected resource - requires lock removal before deletion (IR-02)"
+}
+
 resource "azurerm_monitor_diagnostic_setting" "sql_mi" {
   count = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
 

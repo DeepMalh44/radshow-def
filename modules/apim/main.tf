@@ -1,5 +1,5 @@
 locals {
-  is_premium = var.sku_name == "Premium"
+  is_premium    = var.sku_name == "Premium"
   identity_type = var.user_assigned_identity_ids != null ? "SystemAssigned, UserAssigned" : "SystemAssigned"
 }
 
@@ -86,6 +86,18 @@ resource "azurerm_api_management" "this" {
   }
 
   tags = var.tags
+}
+
+#--------------------------------------------------------------
+# Resource Lock - Prevents accidental deletion in PRD (IR-02)
+#--------------------------------------------------------------
+resource "azurerm_management_lock" "this" {
+  count = var.enable_delete_lock ? 1 : 0
+
+  name       = "lock-${var.name}"
+  scope      = azurerm_api_management.this.id
+  lock_level = "CanNotDelete"
+  notes      = "Protected resource - requires lock removal before deletion (IR-02)"
 }
 
 # ── Named Values (properties) with optional Key Vault reference ──

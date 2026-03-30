@@ -67,12 +67,12 @@ resource "azurerm_cdn_frontdoor_firewall_policy" "this" {
         for_each = custom_rule.value.match_conditions
 
         content {
-          match_variable   = match_condition.value.match_variable
-          operator         = match_condition.value.operator
-          match_values     = match_condition.value.match_values
+          match_variable     = match_condition.value.match_variable
+          operator           = match_condition.value.operator
+          match_values       = match_condition.value.match_values
           negation_condition = match_condition.value.negation_condition
-          selector         = match_condition.value.selector
-          transforms       = match_condition.value.transforms
+          selector           = match_condition.value.selector
+          transforms         = match_condition.value.transforms
         }
       }
     }

@@ -27,3 +27,8 @@ output "failover_group_name" {
   description = "Name of the failover group (empty if not created)"
   value       = try(azurerm_mssql_managed_instance_failover_group.this[0].name, "")
 }
+
+output "lock_id" {
+  description = "Resource ID of the management lock (empty if not enabled)"
+  value       = try(azurerm_management_lock.this[0].id, "")
+}

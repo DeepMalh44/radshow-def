@@ -46,9 +46,9 @@ variable "dns_name_label" {
 variable "containers" {
   description = "List of container definitions"
   type = list(object({
-    name  = string
-    image = string
-    cpu   = number
+    name   = string
+    image  = string
+    cpu    = number
     memory = number
     ports = optional(list(object({
       port     = number

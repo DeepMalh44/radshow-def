@@ -28,3 +28,14 @@ output "runbook_names" {
   description = "Names of all deployed runbooks"
   value       = [for k, v in azurerm_automation_runbook.this : v.name]
 }
+
+output "dr_webhook_uri" {
+  description = "URI of the DR failover webhook (sensitive - for action group routing)"
+  value       = try(azurerm_automation_webhook.dr_failover[0].uri, "")
+  sensitive   = true
+}
+
+output "dr_webhook_name" {
+  description = "Name of the DR failover webhook"
+  value       = try(azurerm_automation_webhook.dr_failover[0].name, "")
+}

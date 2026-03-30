@@ -74,6 +74,25 @@ resource "azurerm_automation_account" "this" {
   }
 }
 
+#--------------------------------------------------------------
+# Webhook for DR Failover runbook (dual-AA alert routing)
+#--------------------------------------------------------------
+resource "azurerm_automation_webhook" "dr_failover" {
+  count = var.enable_dr_runbooks && var.enable_dr_webhook ? 1 : 0
+
+  name                    = "wh-${var.name}-dr-failover"
+  resource_group_name     = var.resource_group_name
+  automation_account_name = azurerm_automation_account.this.name
+  runbook_name            = azurerm_automation_runbook.this["Invoke-DRFailover"].name
+  expiry_time             = var.webhook_expiry_time
+  enabled                 = true
+
+  parameters = {
+    failovertype = var.webhook_default_failover_type
+    action       = var.webhook_default_action
+  }
+}
+
 resource "azurerm_automation_runbook" "this" {
   for_each = local.all_runbooks
 

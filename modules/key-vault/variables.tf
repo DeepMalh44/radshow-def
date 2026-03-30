@@ -111,3 +111,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_delete_lock" {
+  description = "Enable CanNotDelete lock on the Key Vault (recommended for PRD per IR-02)"
+  type        = bool
+  default     = false
+}

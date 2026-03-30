@@ -46,20 +46,20 @@ variable "origin_groups" {
 variable "origins" {
   description = "Map of origins with priority for active-passive (primary=1, secondary=2)"
   type = map(object({
-    origin_group_key              = string
-    enabled                       = bool
+    origin_group_key               = string
+    enabled                        = bool
     certificate_name_check_enabled = bool
-    host_name                     = string
-    origin_host_header            = string
-    http_port                     = number
-    https_port                    = number
-    priority                      = number
-    weight                        = number
+    host_name                      = string
+    origin_host_header             = string
+    http_port                      = number
+    https_port                     = number
+    priority                       = number
+    weight                         = number
     private_link = optional(object({
-      location                = string
-      private_link_target_id  = string
-      request_message         = string
-      target_type             = string
+      location               = string
+      private_link_target_id = string
+      request_message        = string
+      target_type            = string
     }))
   }))
 }
@@ -74,16 +74,16 @@ variable "endpoints" {
 variable "routes" {
   description = "Map of routes linking endpoints to origin groups"
   type = map(object({
-    endpoint_key          = string
-    origin_group_key      = string
-    origin_keys           = list(string)
-    enabled               = bool
-    forwarding_protocol   = string
+    endpoint_key           = string
+    origin_group_key       = string
+    origin_keys            = list(string)
+    enabled                = bool
+    forwarding_protocol    = string
     https_redirect_enabled = bool
-    patterns_to_match     = list(string)
-    supported_protocols   = list(string)
+    patterns_to_match      = list(string)
+    supported_protocols    = list(string)
     link_to_default_domain = bool
-    custom_domain_names   = optional(list(string), [])
+    custom_domain_names    = optional(list(string), [])
     cache = optional(object({
       query_string_caching_behavior = string
       query_strings                 = optional(list(string), [])
@@ -152,20 +152,20 @@ variable "waf_managed_rules" {
 variable "waf_custom_rules" {
   description = "List of custom rules for the WAF policy"
   type = list(object({
-    name     = string
-    action   = string
-    type     = string
-    priority = number
-    enabled  = optional(bool, true)
+    name                           = string
+    action                         = string
+    type                           = string
+    priority                       = number
+    enabled                        = optional(bool, true)
     rate_limit_duration_in_minutes = optional(number, 1)
     rate_limit_threshold           = optional(number, 10)
     match_conditions = list(object({
-      match_variable   = string
-      operator         = string
-      match_values     = list(string)
+      match_variable     = string
+      operator           = string
+      match_values       = list(string)
       negation_condition = optional(bool, false)
-      selector         = optional(string)
-      transforms       = optional(list(string), [])
+      selector           = optional(string)
+      transforms         = optional(list(string), [])
     }))
   }))
   default = []

@@ -34,6 +34,18 @@ resource "azurerm_key_vault" "this" {
   tags = var.tags
 }
 
+#--------------------------------------------------------------
+# Resource Lock - Prevents accidental deletion in PRD (IR-02)
+#--------------------------------------------------------------
+resource "azurerm_management_lock" "this" {
+  count = var.enable_delete_lock ? 1 : 0
+
+  name       = "lock-${var.name}"
+  scope      = azurerm_key_vault.this.id
+  lock_level = "CanNotDelete"
+  notes      = "Protected resource - requires lock removal before deletion (IR-02)"
+}
+
 resource "azurerm_monitor_diagnostic_setting" "this" {
   count = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
 

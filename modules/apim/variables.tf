@@ -91,10 +91,10 @@ variable "sign_up_enabled" {
 variable "named_values" {
   description = "Map of named values (properties) to create in APIM"
   type = map(object({
-    display_name         = string
-    value                = optional(string)
-    secret               = optional(bool, false)
-    key_vault_secret_id  = optional(string)
+    display_name        = string
+    value               = optional(string)
+    secret              = optional(bool, false)
+    key_vault_secret_id = optional(string)
   }))
   default = {}
 }
@@ -115,4 +115,10 @@ variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
   default     = {}
+}
+
+variable "enable_delete_lock" {
+  description = "Enable CanNotDelete lock on the APIM instance (recommended for PRD per IR-02)"
+  type        = bool
+  default     = false
 }

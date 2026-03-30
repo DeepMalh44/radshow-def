@@ -113,7 +113,7 @@ variable "ip_restrictions" {
     action      = string
     ip_address  = optional(string)
     service_tag = optional(string)
-    headers     = optional(list(object({
+    headers = optional(list(object({
       x_forwarded_for   = optional(list(string))
       x_forwarded_host  = optional(list(string))
       x_fd_health_probe = optional(list(string))

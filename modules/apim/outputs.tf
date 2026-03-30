@@ -48,6 +48,11 @@ output "identity_principal_id" {
   value       = try(azurerm_api_management.this.identity[0].principal_id, null)
 }
 
+output "lock_id" {
+  description = "Resource ID of the management lock (empty if not enabled)"
+  value       = try(azurerm_management_lock.this[0].id, "")
+}
+
 output "identity_tenant_id" {
   description = "Tenant ID of the SystemAssigned managed identity"
   value       = try(azurerm_api_management.this.identity[0].tenant_id, null)

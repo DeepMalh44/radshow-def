@@ -1,10 +1,10 @@
 resource "azurerm_service_plan" "this" {
-  name                  = var.service_plan_name
-  location              = var.location
-  resource_group_name   = var.resource_group_name
-  os_type               = var.os_type
-  sku_name              = var.service_plan_sku_name
-  worker_count          = var.worker_count
+  name                   = var.service_plan_name
+  location               = var.location
+  resource_group_name    = var.resource_group_name
+  os_type                = var.os_type
+  sku_name               = var.service_plan_sku_name
+  worker_count           = var.worker_count
   zone_balancing_enabled = var.zone_redundant
 
   tags = var.tags
@@ -23,8 +23,8 @@ resource "azurerm_linux_web_app" "this" {
     health_check_path                 = var.health_check_path
     health_check_eviction_time_in_min = var.health_check_eviction_time_in_min
     ftps_state                        = "Disabled"
-    http2_enabled          = true
-    minimum_tls_version    = "1.2"
+    http2_enabled                     = true
+    minimum_tls_version               = "1.2"
 
     application_stack {
       dotnet_version = var.dotnet_version
@@ -85,8 +85,8 @@ resource "azurerm_linux_web_app_slot" "staging" {
     health_check_path                 = var.health_check_path
     health_check_eviction_time_in_min = var.health_check_eviction_time_in_min
     ftps_state                        = "Disabled"
-    http2_enabled          = true
-    minimum_tls_version    = "1.2"
+    http2_enabled                     = true
+    minimum_tls_version               = "1.2"
 
     application_stack {
       dotnet_version = var.dotnet_version

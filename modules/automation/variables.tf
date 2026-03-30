@@ -37,6 +37,30 @@ variable "enable_dr_runbooks" {
   default     = false
 }
 
+variable "enable_dr_webhook" {
+  description = "Create a webhook for the DR failover runbook (for dual-AA alert routing)"
+  type        = bool
+  default     = false
+}
+
+variable "webhook_expiry_time" {
+  description = "Expiry time for the DR webhook (RFC3339 format)"
+  type        = string
+  default     = "2027-12-31T00:00:00Z"
+}
+
+variable "webhook_default_failover_type" {
+  description = "Default FailoverType parameter for webhook invocation (Planned or Forced)"
+  type        = string
+  default     = "Planned"
+}
+
+variable "webhook_default_action" {
+  description = "Default Action parameter for webhook invocation (failover or failback)"
+  type        = string
+  default     = "failover"
+}
+
 variable "runbooks" {
   description = "Map of runbooks to create in the Automation Account"
   type = map(object({

@@ -30,6 +30,21 @@ resource "azurerm_monitor_action_group" "this" {
       email_address = email_receiver.value.email_address
     }
   }
+
+  # Dual-AA webhook receivers for DR failover resilience
+  # If primary AA region is down, alert fires to secondary AA webhook
+  dynamic "automation_runbook_receiver" {
+    for_each = var.dr_automation_webhook_receivers
+    content {
+      name                    = automation_runbook_receiver.value.name
+      automation_account_id   = automation_runbook_receiver.value.automation_account_id
+      runbook_name            = automation_runbook_receiver.value.runbook_name
+      webhook_resource_id     = automation_runbook_receiver.value.webhook_resource_id
+      is_global_runbook       = automation_runbook_receiver.value.is_global_runbook
+      service_uri             = automation_runbook_receiver.value.service_uri
+      use_common_alert_schema = true
+    }
+  }
 }
 
 resource "azurerm_monitor_metric_alert" "this" {
