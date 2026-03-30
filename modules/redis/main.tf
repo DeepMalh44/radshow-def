@@ -12,15 +12,16 @@ resource "azurerm_redis_cache" "this" {
   zones                         = length(var.zones) > 0 ? var.zones : null
   subnet_id                     = var.subnet_id
   private_static_ip_address     = var.private_static_ip_address
-  public_network_access_enabled = var.subnet_id != null ? false : true
+  public_network_access_enabled = var.public_network_access_enabled
 
   redis_configuration {
-    maxmemory_policy                = var.redis_configuration.maxmemory_policy
-    maxmemory_reserved              = var.redis_configuration.maxmemory_reserved
-    maxfragmentationmemory_reserved = var.redis_configuration.maxfragmentationmemory_reserved
-    rdb_backup_enabled              = var.redis_configuration.rdb_backup_enabled
-    rdb_backup_frequency            = var.redis_configuration.rdb_backup_frequency
-    rdb_storage_connection_string   = var.redis_configuration.rdb_storage_connection_string
+    maxmemory_policy                      = var.redis_configuration.maxmemory_policy
+    maxmemory_reserved                    = var.redis_configuration.maxmemory_reserved
+    maxfragmentationmemory_reserved       = var.redis_configuration.maxfragmentationmemory_reserved
+    active_directory_authentication_enabled = var.redis_configuration.active_directory_authentication_enabled
+    rdb_backup_enabled                    = var.redis_configuration.rdb_backup_enabled
+    rdb_backup_frequency                  = var.redis_configuration.rdb_backup_frequency
+    rdb_storage_connection_string         = var.redis_configuration.rdb_storage_connection_string
   }
 
   dynamic "patch_schedule" {

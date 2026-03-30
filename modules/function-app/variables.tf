@@ -138,6 +138,12 @@ variable "container_registry_use_managed_identity" {
   default     = false
 }
 
+variable "vnet_route_all_enabled" {
+  description = "Whether all outbound traffic from the Function App is routed through the VNet"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

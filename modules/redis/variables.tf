@@ -67,15 +67,22 @@ variable "subnet_id" {
   default     = null
 }
 
+variable "public_network_access_enabled" {
+  description = "Whether public network access is enabled for the Redis Cache"
+  type        = bool
+  default     = true
+}
+
 variable "redis_configuration" {
   description = "Redis configuration settings"
   type = object({
-    maxmemory_policy                = optional(string, "volatile-lru")
-    maxmemory_reserved              = optional(number)
-    maxfragmentationmemory_reserved = optional(number)
-    rdb_backup_enabled              = optional(bool)
-    rdb_backup_frequency            = optional(number)
-    rdb_storage_connection_string   = optional(string)
+    maxmemory_policy                       = optional(string, "volatile-lru")
+    maxmemory_reserved                     = optional(number)
+    maxfragmentationmemory_reserved        = optional(number)
+    active_directory_authentication_enabled = optional(bool, false)
+    rdb_backup_enabled                     = optional(bool)
+    rdb_backup_frequency                   = optional(number)
+    rdb_storage_connection_string          = optional(string)
   })
   default = {}
 }

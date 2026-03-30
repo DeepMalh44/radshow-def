@@ -31,6 +31,7 @@ resource "azurerm_linux_function_app" "this" {
     minimum_tls_version                    = "1.2"
     http2_enabled                          = true
     elastic_instance_minimum               = 1
+    vnet_route_all_enabled                 = var.vnet_route_all_enabled
     container_registry_use_managed_identity = var.container_registry_use_managed_identity
 
     application_stack {
