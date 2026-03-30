@@ -24,13 +24,14 @@ resource "azurerm_linux_function_app" "this" {
   virtual_network_subnet_id = var.vnet_integration_subnet_id
 
   site_config {
-    always_on                         = var.always_on
-    health_check_path                 = var.health_check_path
-    health_check_eviction_time_in_min = var.health_check_eviction_time_in_min
-    ftps_state                        = "Disabled"
-    minimum_tls_version               = "1.2"
-    http2_enabled                     = true
-    elastic_instance_minimum          = 1
+    always_on                              = var.always_on
+    health_check_path                      = var.health_check_path
+    health_check_eviction_time_in_min      = var.health_check_eviction_time_in_min
+    ftps_state                             = "Disabled"
+    minimum_tls_version                    = "1.2"
+    http2_enabled                          = true
+    elastic_instance_minimum               = 1
+    container_registry_use_managed_identity = var.container_registry_use_managed_identity
 
     application_stack {
       dotnet_version              = var.dotnet_version

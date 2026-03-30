@@ -132,6 +132,12 @@ variable "zone_redundant" {
   default     = false
 }
 
+variable "container_registry_use_managed_identity" {
+  description = "Whether the Function App should use Managed Identity to pull images from ACR"
+  type        = bool
+  default     = false
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)

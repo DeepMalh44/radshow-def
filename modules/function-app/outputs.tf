@@ -27,3 +27,8 @@ output "identity_principal_id" {
   description = "Principal ID of the system-assigned managed identity"
   value       = try(azurerm_linux_function_app.this.identity[0].principal_id, null)
 }
+
+output "kind" {
+  description = "The kind of the Function App (functionapp,linux,container)"
+  value       = azurerm_linux_function_app.this.kind
+}
