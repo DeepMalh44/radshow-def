@@ -95,7 +95,7 @@ resource "azurerm_management_lock" "this" {
 resource "azurerm_monitor_diagnostic_setting" "sql_mi" {
   count = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
 
-  name                       = "${var.name}-diag"
+  name                       = "tf-${var.name}-diag"
   target_resource_id         = azapi_resource.sql_mi.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

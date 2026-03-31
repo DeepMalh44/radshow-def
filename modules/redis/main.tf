@@ -51,7 +51,7 @@ resource "azurerm_redis_linked_server" "this" {
 
 resource "azurerm_monitor_diagnostic_setting" "this" {
   count                      = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
-  name                       = "${var.name}-diag"
+  name                       = "tf-${var.name}-diag"
   target_resource_id         = azurerm_redis_cache.this.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

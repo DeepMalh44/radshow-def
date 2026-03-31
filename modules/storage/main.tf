@@ -59,7 +59,7 @@ resource "azurerm_storage_container" "this" {
 resource "azurerm_monitor_diagnostic_setting" "blob" {
   count = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
 
-  name                       = "${var.name}-blob-diag"
+  name                       = "tf-${var.name}-blob-diag"
   target_resource_id         = "${azurerm_storage_account.this.id}/blobServices/default"
   log_analytics_workspace_id = var.log_analytics_workspace_id
 

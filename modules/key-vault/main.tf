@@ -49,7 +49,7 @@ resource "azurerm_management_lock" "this" {
 resource "azurerm_monitor_diagnostic_setting" "this" {
   count = var.enable_diagnostics && var.log_analytics_workspace_id != "" ? 1 : 0
 
-  name                       = "${var.name}-diag"
+  name                       = "tf-${var.name}-diag"
   target_resource_id         = azurerm_key_vault.this.id
   log_analytics_workspace_id = var.log_analytics_workspace_id
 
