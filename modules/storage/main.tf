@@ -48,7 +48,8 @@ resource "azurerm_storage_account" "this" {
 }
 
 resource "azurerm_storage_container" "this" {
-  for_each = var.containers
+  # Exclude $web when static_website is enabled — Azure creates it automatically
+  for_each = { for k, v in var.containers : k => v if !(k == "$web" && var.enable_static_website) }
 
   name                  = each.key
   storage_account_id    = azurerm_storage_account.this.id
