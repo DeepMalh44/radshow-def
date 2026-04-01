@@ -24,7 +24,7 @@ resource "azapi_resource" "sql_mi" {
       tier   = local.sku_tier
       family = local.sku_family
     }
-    properties = {
+    properties = merge({
       subnetId                   = var.subnet_id
       licenseType                = var.license_type
       vCores                     = var.vcores
@@ -44,7 +44,7 @@ resource "azapi_resource" "sql_mi" {
         tenantId                  = var.entra_admin_tenant_id
         principalType             = var.entra_admin_principal_type
       }
-    }
+    }, var.dns_zone_partner_id != "" ? { dnsZonePartner = var.dns_zone_partner_id } : {})
   }
 
   tags = var.tags

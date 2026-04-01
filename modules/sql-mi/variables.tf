@@ -180,3 +180,9 @@ variable "enable_delete_lock" {
   type        = bool
   default     = false
 }
+
+variable "dns_zone_partner_id" {
+  description = "Resource ID of the partner SQL MI to share DNS zone with (required for secondary in failover group)"
+  type        = string
+  default     = ""
+}
