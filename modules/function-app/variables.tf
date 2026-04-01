@@ -126,6 +126,12 @@ variable "log_analytics_workspace_id" {
   default     = ""
 }
 
+variable "public_network_access_enabled" {
+  description = "Whether the Function App is accessible from the public internet"
+  type        = bool
+  default     = true
+}
+
 variable "zone_redundant" {
   description = "Whether the App Service Plan should be zone redundant"
   type        = bool

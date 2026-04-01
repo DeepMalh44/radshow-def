@@ -20,8 +20,9 @@ resource "azurerm_linux_function_app" "this" {
   storage_uses_managed_identity = var.storage_uses_managed_identity
   builtin_logging_enabled       = false
 
-  https_only                = true
-  virtual_network_subnet_id = var.vnet_integration_subnet_id
+  https_only                    = true
+  virtual_network_subnet_id     = var.vnet_integration_subnet_id
+  public_network_access_enabled = var.public_network_access_enabled
 
   site_config {
     always_on                              = var.always_on
