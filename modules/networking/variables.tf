@@ -55,3 +55,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_sqlmi_public_endpoint" {
+  description = "Whether to add NSG rule allowing inbound TCP 3342 for SQL MI public endpoint"
+  type        = bool
+  default     = false
+}

@@ -121,7 +121,24 @@ resource "azurerm_network_security_rule" "apim_internet_443" {
 }
 
 locals {
-  sqlmi_subnets = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
+  sqlmi_subnets            = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
+  sqlmi_public_ep_subnets  = var.enable_sqlmi_public_endpoint ? local.sqlmi_subnets : {}
+}
+
+resource "azurerm_network_security_rule" "sqlmi_public_endpoint_3342" {
+  for_each = local.sqlmi_public_ep_subnets
+
+  name                        = "Allow_SqlMI_Public_3342"
+  priority                    = 110
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "3342"
+  source_address_prefix       = "Internet"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
 }
 
 resource "azurerm_route_table" "sqlmi" {
