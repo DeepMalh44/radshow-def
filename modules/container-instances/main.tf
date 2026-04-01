@@ -1,4 +1,6 @@
 resource "azurerm_container_group" "this" {
+  count = length(var.containers) > 0 ? 1 : 0
+
   name                = var.name
   location            = var.location
   resource_group_name = var.resource_group_name
