@@ -31,7 +31,7 @@ resource "azurerm_container_group" "this" {
   }
 
   dynamic "image_registry_credential" {
-    for_each = var.image_registry_credential != null ? toset(["default"]) : toset([])
+    for_each = nonsensitive(var.image_registry_credential != null) ? ["default"] : []
     content {
       server   = var.image_registry_credential.server
       username = var.image_registry_credential.username
