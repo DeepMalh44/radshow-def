@@ -36,6 +36,12 @@ variable "public_network_access_enabled" {
   default     = false
 }
 
+variable "network_rule_bypass_option" {
+  description = "Whether to allow trusted Azure services to bypass network rules. AzureServices or None."
+  type        = string
+  default     = "AzureServices"
+}
+
 variable "zone_redundancy_enabled" {
   description = "Whether zone redundancy is enabled for the primary region (Premium SKU only)"
   type        = bool
