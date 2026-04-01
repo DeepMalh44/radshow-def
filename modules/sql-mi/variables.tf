@@ -152,9 +152,9 @@ variable "secondary_instance_id" {
 }
 
 variable "failover_grace_minutes" {
-  description = "Grace period in minutes before automatic failover (5 min per Tier 1 RTO/RPO requirements)"
+  description = "Grace period in minutes before automatic failover (minimum 60 per Azure requirement)"
   type        = number
-  default     = 5
+  default     = 60
 }
 
 variable "enable_diagnostics" {
