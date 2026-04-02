@@ -362,3 +362,134 @@ App Service   ──System MI──►  Key Vault (RBAC)                        
 
 - **No passwords anywhere.** GitHub → Azure uses OIDC federation. Apps → backends use system-assigned managed identities.
 - SQL MI is **Entra-only** (SQL auth disabled). The CI/CD SP (`sp-radshow-cicd`) is the SQL admin and grants access to app managed identities during the `radshow-db` migration pipeline.
+
+---
+
+## TODO: Enable Alert-Driven Automatic Failover
+
+The Terraform modules support fully automatic failover triggered by Azure Monitor alerts, but it requires configuring the IaC inputs. The chain works as follows:
+
+```
+Azure Monitor metric alert fires (e.g., SQL MI availability < 95%)
+        │
+        ▼
+Action Group → automation_runbook_receiver
+        │
+        ▼
+Automation Account webhook → Invoke-DRFailover.ps1
+        │
+        ▼
+SQL MI FOG switch → Front Door origin swap → Key Vault update
+```
+
+The runbook (`Invoke-DRFailover.ps1`) already parses the **Common Alert Schema** from webhooks, authenticates via Managed Identity, and runs the full orchestration. All module code is built — only the Terragrunt config values need to be set.
+
+### Step 1 — Enable DR Runbooks & Webhook
+
+**File:** `radshow-lic/<ENV>/automation/terragrunt.hcl`
+
+Add these inputs:
+
+```hcl
+inputs = {
+  enable_dr_runbooks = true    # deploys all 7 DR scripts as Azure Automation Runbooks
+  enable_dr_webhook  = true    # creates webhook endpoint that alerts can call
+}
+```
+
+This deploys the `Invoke-DRFailover` runbook and exposes a webhook URI. The webhook URI is output as `dr_webhook_uri` (sensitive).
+
+### Step 2 — Define Alert Rules
+
+**File:** `radshow-lic/<ENV>/monitoring/terragrunt.hcl`
+
+Add `enable_dr_alerts = true` and define the metric conditions that should trigger failover:
+
+```hcl
+inputs = {
+  enable_dr_alerts = true
+
+  dr_alert_definitions = {
+    "alert-sqlmi-availability" = {
+      description = "SQL MI availability dropped below 95%"
+      severity    = 0          # Critical
+      frequency   = "PT1M"    # Check every minute
+      window_size = "PT5M"    # Over a 5-minute window
+      scopes      = [dependency.sql_mi.outputs.id]
+      criteria = {
+        metric_namespace = "Microsoft.Sql/managedInstances"
+        metric_name      = "avg_cpu_percent"       # or a custom availability metric
+        aggregation      = "Average"
+        operator         = "GreaterThan"
+        threshold        = 95                       # CPU > 95% as a proxy
+      }
+    }
+    "alert-funcapp-errors" = {
+      description = "Function App 5xx error rate exceeded threshold"
+      severity    = 1
+      frequency   = "PT1M"
+      window_size = "PT5M"
+      scopes      = [dependency.function_app.outputs.id]
+      criteria = {
+        metric_namespace = "Microsoft.Web/sites"
+        metric_name      = "Http5xx"
+        aggregation      = "Total"
+        operator         = "GreaterThan"
+        threshold        = 50
+      }
+    }
+  }
+}
+```
+
+### Step 3 — Wire Action Group to Automation Webhook
+
+In the same `monitoring/terragrunt.hcl`, connect the action group to the automation webhook so alerts trigger the runbook:
+
+```hcl
+inputs = {
+  action_group_name       = "ag-dr-failover-<ENV>"
+  action_group_short_name = "dr-fo"
+
+  dr_automation_webhook_receivers = [
+    {
+      name                  = "primary-aa-failover"
+      automation_account_id = dependency.automation.outputs.id
+      runbook_name          = "Invoke-DRFailover"
+      webhook_resource_id   = dependency.automation.outputs.id   # Automation Account ID
+      is_global_runbook     = false
+      service_uri           = dependency.automation.outputs.dr_webhook_uri
+    }
+  ]
+}
+```
+
+> **Tip for resilience:** Deploy a second Automation Account in the secondary region and add a second entry to `dr_automation_webhook_receivers`. If the primary region is completely down, the secondary AA will still receive the alert and execute failover.
+
+### Step 4 — Grant Automation Account RBAC
+
+The Automation Account's Managed Identity needs permissions to perform failover:
+
+| Role | Scope | Purpose |
+|---|---|---|
+| `SQL Managed Instance Contributor` | SQL MI resource group(s) | Switch Failover Group |
+| `CDN Profile Contributor` | Front Door resource group | Swap origin priorities |
+| `Key Vault Secrets Officer` | Key Vault | Read/write `active-region` secret |
+
+Add these to `radshow-lic/<ENV>/role-assignments/terragrunt.hcl`.
+
+### Step 5 — Deploy & Test
+
+1. Run `terragrunt apply` for the `automation` and `monitoring` modules
+2. Verify the runbook and webhook exist in the Azure portal
+3. Verify the alert rules and action group are created
+4. Test with a dry-run: manually trigger the `Invoke-DRFailover` runbook in the portal with `FailoverType = Planned`, `Action = failover`
+5. Verify the alert chain by temporarily lowering the threshold to trigger a test alert
+
+### Summary of Files to Modify
+
+| File | What to Set |
+|---|---|
+| `radshow-lic/<ENV>/automation/terragrunt.hcl` | `enable_dr_runbooks = true`, `enable_dr_webhook = true` |
+| `radshow-lic/<ENV>/monitoring/terragrunt.hcl` | `enable_dr_alerts = true`, `dr_alert_definitions`, `dr_automation_webhook_receivers`, `action_group_name` |
+| `radshow-lic/<ENV>/role-assignments/terragrunt.hcl` | RBAC for Automation Account MI |
