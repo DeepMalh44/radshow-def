@@ -20,9 +20,9 @@ variable "sku_name" {
 }
 
 variable "response_timeout_seconds" {
-  description = "Response timeout in seconds for the Front Door profile"
+  description = "Response timeout in seconds for the Front Door profile. Set to 240 to support DR failover operations."
   type        = number
-  default     = 60
+  default     = 240
 }
 
 variable "origin_groups" {
