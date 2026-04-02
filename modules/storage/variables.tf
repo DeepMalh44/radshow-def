@@ -49,9 +49,9 @@ variable "min_tls_version" {
 }
 
 variable "public_network_access_enabled" {
-  description = "Whether public network access is allowed"
+  description = "Whether public network access is allowed. Required for Front Door origins without Private Link."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "https_traffic_only_enabled" {
