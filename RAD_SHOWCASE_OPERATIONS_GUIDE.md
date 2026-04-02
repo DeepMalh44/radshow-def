@@ -278,6 +278,52 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 4. **Data:** Zero data loss for planned failover. Potential data loss for unplanned (forced) failover
 5. **Clients:** No URL changes — Front Door endpoint stays the same
 
+### SPA Failover Control Panel (In-App UI)
+
+The SPA includes a built-in **Failover Control** page that lets operators trigger DR directly from the browser — no terminal or Azure portal needed.
+
+**Two ways to trigger failover:**
+
+| Method | Best For |
+|---|---|
+| **SPA UI buttons** (below) | Quick planned failover/failback with visual feedback |
+| **PowerShell scripts** (above) | Full DR drills with health checks, evidence capture, and unplanned (forced) failover |
+
+#### Failover Control View (`/failover`)
+
+| Button | Color | Action |
+|---|---|---|
+| **"Failover to Secondary"** | Red | Switches all traffic to the secondary region |
+| **"Failback to Primary"** | Blue | Returns all traffic to the primary region |
+
+Both buttons prompt for a **password** (stored as `failover-password` secret in Key Vault) before executing.
+
+#### What Happens When You Click
+
+The Function App (`POST /api/failover`) runs a 6-step orchestration using the Azure ARM SDK:
+
+| Step | Action | Detail |
+|---|---|---|
+| 1 | Validate password | Reads `failover-password` from Key Vault |
+| 2 | Check active region | Reads `active-region` from Key Vault; blocks no-op if already in target |
+| 3 | **SQL MI FOG switch** | `InstanceFailoverGroupResource.FailoverAsync()` — graceful, zero data loss |
+| 4 | Stabilization wait | 10-second delay for replication sync |
+| 5 | **Front Door origin swap** | Sets new primary origin to priority 1, old to priority 2 |
+| 6 | **Update Key Vault** | Writes new `active-region` value |
+
+The UI shows a live elapsed timer during execution and then a step-by-step results table with status badges and durations.
+
+#### Regional Status View (`/status`)
+
+Shows real-time health of both regions:
+- Current region and active region
+- Component health (SQL MI, Redis, Function App) with latency measurements
+- **"Refresh"** button calls `GET /api/status`
+
+#### SPA vs PowerShell — Key Difference
+
+The SPA only performs **planned (graceful) failover**. It does NOT support `AllowDataLoss` forced failover — that's intentionally restricted to the PowerShell script `03-Unplanned-Failover.ps1` to prevent accidental data loss from a web UI.
+
 ### Automated Trigger via Azure Automation
 
 `Invoke-DRFailover.ps1` runs as a Runbook. It can be triggered by:
