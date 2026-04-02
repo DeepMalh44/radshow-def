@@ -86,7 +86,7 @@ Front Door routes to APIM based on the `/api/*` pattern match.
 | Repo | Purpose | CI/CD Trigger |
 |------|---------|---------------|
 | **radshow-def** | Reusable Terraform modules (this repo) | `validate.yml` — format + validate on PR; tag releases via `workflow_dispatch` |
-| **radshow-lic** | Terragrunt lifecycle — environment configs (DEV01/STG01/PRD01) | `plan.yml` on PR; `apply.yml` on push to main |
+| **radshow-lic** | Terragrunt lifecycle — environment configs (DEV01/STG01/PRD01) | `plan.yml` on PR; `apply.yml` via `workflow_dispatch` |
 | **radshow-api** | .NET 8 Isolated Function App (container image) | `deploy.yml` — build + ACR push + Function App deploy |
 | **radshow-spa** | Vue 3 SPA | `deploy.yml` — npm build + Storage upload + Front Door cache purge |
 | **radshow-apim** | APIOps artifacts (API definitions, policies, named values) | `publisher.yml` on push to main; `extractor.yml` on demand |
@@ -99,7 +99,7 @@ Front Door routes to APIM based on the `/api/*` pattern match.
 | Environment | Regions | DR | WAF | Purpose |
 |-------------|---------|-----|-----|---------|
 | **DEV01** | swedencentral | No | No | Development |
-| **STG01** | southcentralus + northcentralus | Yes (active-passive) | Yes | Pre-production |
+| **STG01** | centralindia + southindia | Yes (active-passive) | Yes | Pre-production |
 | **PRD01** | southcentralus + northcentralus | Yes (active-passive) | Yes | Production (RTO ≤ 15 min, RPO ≤ 5 min) |
 
 ---
@@ -228,12 +228,29 @@ Deployment order (handled by Terragrunt dependency graph):
 8. automation
 ```
 
-### Step 6: Run SQL Migrations (radshow-db)
+### Step 6: Create Key Vault Secrets (Post-Deploy)
+
+For DR-enabled environments (STG01, PRD01), create two required secrets in the primary Key Vault:
+
+```bash
+# Failover password — authenticates failover requests from the SPA
+az keyvault secret set --vault-name kv-radshow-{env}-{region} \
+  --name "failover-password" --value "<STRONG_PASSWORD>"
+
+# Active region — tracks which region is currently primary
+az keyvault secret set --vault-name kv-radshow-{env}-{region} \
+  --name "active-region" --value "<primary_location>"
+```
+
+> If Key Vault has public network access disabled, temporarily enable it for CLI access.
+> See [DR Operations Guide](https://github.com/DeepMalh44/radshow-lic/blob/main/docs/DR-OPERATIONS-GUIDE.md) for full details.
+
+### Step 7: Run SQL Migrations (radshow-db)
 
 Push migration scripts or trigger `migrate.yml` workflow dispatch.
 Runs `sqlcmd` against the SQL MI to create/update the database schema.
 
-### Step 7: Deploy APIM Configuration (radshow-apim)
+### Step 8: Deploy APIM Configuration (radshow-apim)
 
 Push to `main` or trigger `publisher.yml` workflow dispatch.
 APIOps publisher syncs API definitions, policies, and named values to APIM.
@@ -255,12 +272,12 @@ apis:
       serviceUrl: https://func-radshow-{env}.azurewebsites.net/api
 ```
 
-### Step 8: Deploy API (radshow-api)
+### Step 9: Deploy API (radshow-api)
 
 Push code changes or trigger `deploy.yml` workflow dispatch.
 Builds Docker image → pushes to ACR → updates Function App container config.
 
-### Step 9: Deploy SPA (radshow-spa)
+### Step 10: Deploy SPA (radshow-spa)
 
 Push code changes or trigger `deploy.yml` workflow dispatch.
 Builds Vue 3 app → uploads to Storage `$web` → purges Front Door cache.
@@ -273,10 +290,11 @@ Deploy in this exact order for a brand-new environment:
 
 ```
 1. radshow-lic   →  Infrastructure (Terragrunt apply)
-2. radshow-db    →  Database schema (SQL migrations)
-3. radshow-apim  →  APIM APIs, policies, named values (APIOps publisher)
-4. radshow-api   →  Function App container image (ACR build + deploy)
-5. radshow-spa   →  SPA static files (Storage upload + CDN purge)
+2. Key Vault     →  Create failover-password + active-region secrets (DR envs only)
+3. radshow-db    →  Database schema (SQL migrations)
+4. radshow-apim  →  APIM APIs, policies, named values (APIOps publisher)
+5. radshow-api   →  Function App container image (ACR build + deploy)
+6. radshow-spa   →  SPA static files (Storage upload + CDN purge)
 ```
 
 After initial deployment, repos can be deployed independently in any order
@@ -337,8 +355,13 @@ PRD01 pins to a tagged release (`?ref=v1.0.0`). Create tags via `validate.yml` w
 - **Redis uses access key auth** — `active_directory_authentication_enabled = false`, `public_network_access_enabled = true`
 - **AZURE_REGION app setting** — set automatically from `env.hcl` `primary_location` via `_envcommon/function-app.hcl`
 - **VNet route all** — `vnet_route_all_enabled = true` ensures all Function App egress goes through VNet
+- **Front Door timeout 240s** — `response_timeout_seconds = 240` to support DR failover operations (~120s RTO)
+- **Storage public access** — `public_network_access_enabled = true` required for Front Door SPA origins (no Private Link)
+- **DR failover roles** — Function App Managed Identities have Key Vault Secrets Officer, SQL MI Contributor, CDN Profile Contributor
 - **OIDC everywhere** — all CI/CD pipelines use `ARM_USE_OIDC` / federated credentials, no stored secrets
 - **Terraform state** — stored in Azure Storage with AAD auth (`use_azuread_auth = true`)
+- **Environment approval gates** — all repos have required reviewer (DeepMalh44) on DEV01, STG01, PRD01 environments
+- **DR Operations Guide** — see [radshow-lic/docs/DR-OPERATIONS-GUIDE.md](https://github.com/DeepMalh44/radshow-lic/blob/main/docs/DR-OPERATIONS-GUIDE.md) for failover procedures, KV secrets, and troubleshooting
 
 ---
 
