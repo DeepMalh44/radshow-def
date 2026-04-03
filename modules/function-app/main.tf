@@ -25,14 +25,14 @@ resource "azurerm_linux_function_app" "this" {
   public_network_access_enabled = var.public_network_access_enabled
 
   site_config {
-    always_on                              = var.always_on
-    health_check_path                      = var.health_check_path
-    health_check_eviction_time_in_min      = var.health_check_eviction_time_in_min
-    ftps_state                             = "Disabled"
-    minimum_tls_version                    = "1.2"
-    http2_enabled                          = true
-    elastic_instance_minimum               = 1
-    vnet_route_all_enabled                 = var.vnet_route_all_enabled
+    always_on                               = var.always_on
+    health_check_path                       = var.health_check_path
+    health_check_eviction_time_in_min       = var.health_check_eviction_time_in_min
+    ftps_state                              = "Disabled"
+    minimum_tls_version                     = "1.2"
+    http2_enabled                           = true
+    elastic_instance_minimum                = 1
+    vnet_route_all_enabled                  = var.vnet_route_all_enabled
     container_registry_use_managed_identity = var.container_registry_use_managed_identity
 
     application_stack {

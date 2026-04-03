@@ -121,8 +121,8 @@ resource "azurerm_network_security_rule" "apim_internet_443" {
 }
 
 locals {
-  sqlmi_subnets            = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
-  sqlmi_public_ep_subnets  = var.enable_sqlmi_public_endpoint ? local.sqlmi_subnets : {}
+  sqlmi_subnets           = { for k, v in var.subnets : k => v if v.is_sqlmi_subnet }
+  sqlmi_public_ep_subnets = var.enable_sqlmi_public_endpoint ? local.sqlmi_subnets : {}
 }
 
 resource "azurerm_network_security_rule" "sqlmi_public_endpoint_3342" {

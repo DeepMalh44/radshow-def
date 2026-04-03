@@ -15,13 +15,13 @@ resource "azurerm_redis_cache" "this" {
   public_network_access_enabled = var.public_network_access_enabled
 
   redis_configuration {
-    maxmemory_policy                      = var.redis_configuration.maxmemory_policy
-    maxmemory_reserved                    = var.redis_configuration.maxmemory_reserved
-    maxfragmentationmemory_reserved       = var.redis_configuration.maxfragmentationmemory_reserved
+    maxmemory_policy                        = var.redis_configuration.maxmemory_policy
+    maxmemory_reserved                      = var.redis_configuration.maxmemory_reserved
+    maxfragmentationmemory_reserved         = var.redis_configuration.maxfragmentationmemory_reserved
     active_directory_authentication_enabled = var.redis_configuration.active_directory_authentication_enabled
-    rdb_backup_enabled                    = var.redis_configuration.rdb_backup_enabled
-    rdb_backup_frequency                  = var.redis_configuration.rdb_backup_frequency
-    rdb_storage_connection_string         = var.redis_configuration.rdb_storage_connection_string
+    rdb_backup_enabled                      = var.redis_configuration.rdb_backup_enabled
+    rdb_backup_frequency                    = var.redis_configuration.rdb_backup_frequency
+    rdb_storage_connection_string           = var.redis_configuration.rdb_storage_connection_string
   }
 
   dynamic "patch_schedule" {

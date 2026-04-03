@@ -11,13 +11,13 @@ resource "azurerm_service_plan" "this" {
 }
 
 resource "azurerm_linux_web_app" "this" {
-  name                           = var.name
-  location                       = var.location
-  resource_group_name            = var.resource_group_name
-  service_plan_id                = azurerm_service_plan.this.id
-  https_only                     = true
-  virtual_network_subnet_id      = var.vnet_integration_subnet_id
-  public_network_access_enabled  = var.public_network_access_enabled
+  name                          = var.name
+  location                      = var.location
+  resource_group_name           = var.resource_group_name
+  service_plan_id               = azurerm_service_plan.this.id
+  https_only                    = true
+  virtual_network_subnet_id     = var.vnet_integration_subnet_id
+  public_network_access_enabled = var.public_network_access_enabled
 
   site_config {
     always_on                         = var.always_on
