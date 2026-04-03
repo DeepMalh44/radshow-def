@@ -28,7 +28,8 @@ variable "response_timeout_seconds" {
 variable "origin_groups" {
   description = "Map of origin groups for active-passive routing"
   type = map(object({
-    session_affinity_enabled = bool
+    session_affinity_enabled                                  = bool
+    restore_traffic_time_to_healed_or_new_endpoints_in_minutes = optional(number, 10)
     health_probe = object({
       interval_in_seconds = number
       path                = string

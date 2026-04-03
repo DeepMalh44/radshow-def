@@ -23,3 +23,8 @@ variable "failover_grace_minutes" {
   type        = number
   default     = 60
 }
+
+variable "primary_instance_fqdn" {
+  description = "FQDN of the primary SQL MI (used to derive the FOG listener endpoint)"
+  type        = string
+}

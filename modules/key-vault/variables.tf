@@ -117,3 +117,10 @@ variable "enable_delete_lock" {
   type        = bool
   default     = false
 }
+
+variable "secrets" {
+  description = "Map of secrets to create in the Key Vault. Key = secret name, value = secret value. Requires RBAC or access-policy write permission on the deploying principal."
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}

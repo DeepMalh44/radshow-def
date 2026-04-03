@@ -19,6 +19,8 @@ resource "azurerm_cdn_frontdoor_origin_group" "this" {
   cdn_frontdoor_profile_id = azurerm_cdn_frontdoor_profile.this.id
   session_affinity_enabled = each.value.session_affinity_enabled
 
+  restore_traffic_time_to_healed_or_new_endpoints_in_minutes = each.value.restore_traffic_time_to_healed_or_new_endpoints_in_minutes
+
   health_probe {
     interval_in_seconds = each.value.health_probe.interval_in_seconds
     path                = each.value.health_probe.path
