@@ -66,10 +66,14 @@ resource "azurerm_monitor_diagnostic_setting" "this" {
 ###############################################################################
 # Secrets (optional – seeded at provision time for DR failover etc.)
 ###############################################################################
+locals {
+  secret_keys = nonsensitive(toset(keys(var.secrets)))
+}
+
 resource "azurerm_key_vault_secret" "this" {
-  for_each = var.secrets
+  for_each = local.secret_keys
 
   name         = each.key
-  value        = each.value
+  value        = var.secrets[each.key]
   key_vault_id = azurerm_key_vault.this.id
 }
