@@ -147,6 +147,55 @@ foreach ($name in @($Config.FuncAppPrimaryName, $Config.FuncAppSecondaryName)) {
     }
 }
 
+Write-Output ""
+
+# ── 6. API Management ──────────────────────────────────────────────────────
+Write-Output "[CHECK] API Management: $($Config.ApimName)"
+try {
+    $apim = Get-AzApiManagement -ResourceGroupName $Config.ApimResourceGroup -Name $Config.ApimName -ErrorAction Stop
+
+    $results += @{
+        Component = "APIM"
+        Status    = if ($apim.ProvisioningState -eq "Succeeded") { "Healthy" } else { "Warning" }
+        Detail    = "State=$($apim.ProvisioningState), SKU=$($apim.Sku), Regions=$($apim.AdditionalRegions.Count + 1)"
+    }
+    Write-Output "  Provisioning State: $($apim.ProvisioningState)"
+    Write-Output "  SKU: $($apim.Sku)"
+    Write-Output "  Gateway URL: $($apim.GatewayUrl)"
+
+    if ($apim.AdditionalRegions.Count -gt 0) {
+        foreach ($region in $apim.AdditionalRegions) {
+            $regionHealthy = $region.ProvisioningState -eq "Succeeded"
+            $results += @{
+                Component = "APIM Region: $($region.Location)"
+                Status    = if ($regionHealthy) { "Healthy" } else { "Warning" }
+                Detail    = "State=$($region.ProvisioningState), Gateway=$($region.GatewayRegionalUrl)"
+            }
+            Write-Output "  Region: $($region.Location) ($($region.ProvisioningState))"
+        }
+    }
+
+    # Probe the APIM gateway endpoint
+    try {
+        $gatewayUrl = "$($apim.GatewayUrl)/status-0123456789abcdef"
+        $probeResponse = Invoke-WebRequest -Uri $gatewayUrl -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+        $results += @{
+            Component = "APIM Gateway Probe"
+            Status    = if ($probeResponse.StatusCode -eq 200) { "Healthy" } else { "Warning" }
+            Detail    = "StatusCode=$($probeResponse.StatusCode)"
+        }
+        Write-Output "  Gateway Probe: $($probeResponse.StatusCode)"
+    }
+    catch {
+        $results += @{ Component = "APIM Gateway Probe"; Status = "Warning"; Detail = $_.Exception.Message }
+        Write-Warning "  Gateway Probe: $($_.Exception.Message)"
+    }
+}
+catch {
+    $results += @{ Component = "APIM"; Status = "Error"; Detail = $_.Exception.Message }
+    Write-Warning "  APIM check failed: $($_.Exception.Message)"
+}
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 Write-Output ""
 Write-Output "============================================"

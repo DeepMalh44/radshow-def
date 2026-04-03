@@ -184,6 +184,57 @@ catch {
     Write-Warning "  [FAIL] $($_.Exception.Message)"
 }
 
+Write-Output ""
+
+# ── 6. APIM Gateway Health ──────────────────────────────────────────────────
+Write-Output "[VALIDATE] API Management Gateway"
+try {
+    $apim = Get-AzApiManagement -ResourceGroupName $Config.ApimResourceGroup -Name $Config.ApimName -ErrorAction Stop
+    $healthy = $apim.ProvisioningState -eq "Succeeded"
+
+    $validationResults += @{
+        Check  = "APIM Provisioning"
+        Pass   = $healthy
+        Detail = "State=$($apim.ProvisioningState)"
+    }
+    Write-Output "  Provisioning: $($apim.ProvisioningState) $(if ($healthy) {'[PASS]'} else {'[FAIL]'})"
+
+    # Probe the gateway endpoint
+    try {
+        $gatewayUrl = "$($apim.GatewayUrl)/status-0123456789abcdef"
+        $response = Invoke-WebRequest -Uri $gatewayUrl -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+        $gwHealthy = $response.StatusCode -eq 200
+
+        $validationResults += @{
+            Check  = "APIM Gateway Endpoint"
+            Pass   = $gwHealthy
+            Detail = "StatusCode=$($response.StatusCode)"
+        }
+        Write-Output "  Gateway probe: $($response.StatusCode) $(if ($gwHealthy) {'[PASS]'} else {'[FAIL]'})"
+    }
+    catch {
+        $validationResults += @{ Check = "APIM Gateway Endpoint"; Pass = $false; Detail = $_.Exception.Message }
+        Write-Warning "  Gateway probe: [FAIL] $($_.Exception.Message)"
+    }
+
+    # Validate additional regions are healthy
+    if ($apim.AdditionalRegions.Count -gt 0) {
+        foreach ($region in $apim.AdditionalRegions) {
+            $regionHealthy = $region.ProvisioningState -eq "Succeeded"
+            $validationResults += @{
+                Check  = "APIM Region: $($region.Location)"
+                Pass   = $regionHealthy
+                Detail = "State=$($region.ProvisioningState)"
+            }
+            Write-Output "  Region $($region.Location): $($region.ProvisioningState) $(if ($regionHealthy) {'[PASS]'} else {'[FAIL]'})"
+        }
+    }
+}
+catch {
+    $validationResults += @{ Check = "APIM"; Pass = $false; Detail = $_.Exception.Message }
+    Write-Warning "  [FAIL] $($_.Exception.Message)"
+}
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 Write-Output ""
 Write-Output "============================================"

@@ -58,6 +58,10 @@ $global:DrConfig = @{
     # Function Apps
     FuncAppPrimaryName     = "func-$ProjectName-$Environment-scus"
     FuncAppSecondaryName   = "func-$ProjectName-$Environment-ncus"
+
+    # API Management
+    ApimName               = "apim-$ProjectName-$Environment-scus"
+    ApimResourceGroup      = "rg-$ProjectName-$Environment-scus"
 }
 
 Write-Output "============================================"
