@@ -54,6 +54,14 @@ resource "azurerm_linux_function_app" "this" {
   }
 
   tags = var.tags
+
+  # Container images are deployed via CI/CD (az functionapp config container set),
+  # which changes linux_fx_version from the application_stack default. Ignore drift.
+  lifecycle {
+    ignore_changes = [
+      site_config[0].application_stack,
+    ]
+  }
 }
 
 # ---------------------------------------------------------
