@@ -32,3 +32,8 @@ output "container_app_latest_revision_fqdns" {
   description = "Map of Container App keys to their latest revision FQDNs"
   value       = { for k, v in azurerm_container_app.this : k => v.latest_revision_fqdn }
 }
+
+output "container_app_identity_principal_ids" {
+  description = "Map of Container App keys to their SystemAssigned managed identity principal IDs"
+  value       = { for k, v in azurerm_container_app.this : k => try(v.identity[0].principal_id, null) }
+}
