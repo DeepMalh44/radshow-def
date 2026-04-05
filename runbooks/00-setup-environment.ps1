@@ -44,6 +44,8 @@ $regionShortNames = @{
     "westeurope"     = "weu"
     "northeurope"    = "neu"
     "swedencentral"  = "swc"
+    "centralindia"   = "cin"
+    "southindia"     = "sin"
 }
 
 $pri = $regionShortNames[$PrimaryRegion]
@@ -77,7 +79,7 @@ $global:DrConfig = @{
     RedisSecondaryName     = "redis-$ProjectName-$Environment-$sec"
 
     # Front Door
-    FrontDoorProfileName   = "fd-$ProjectName-$Environment"
+    FrontDoorProfileName   = "afd-$ProjectName-$Environment"
     FrontDoorResourceGroup = "rg-$ProjectName-$Environment-$pri"
 
     # Key Vault (primary — used for active-region secret + failover password)
@@ -91,9 +93,17 @@ $global:DrConfig = @{
     FuncAppPrimaryName     = "func-$ProjectName-$Environment-$pri"
     FuncAppSecondaryName   = "func-$ProjectName-$Environment-$sec"
 
+    # App Services (web app)
+    AppServicePrimaryName  = "app-$ProjectName-$Environment-$pri"
+    AppServiceSecondaryName = "app-$ProjectName-$Environment-$sec"
+
     # Container Apps
-    ContainerAppPrimaryName  = "ca-radshow-api-$Environment-$pri"
-    ContainerAppSecondaryName = "ca-radshow-api-$Environment-$sec"
+    ContainerAppPrimaryName  = "ca-products-$ProjectName-$Environment-$pri"
+    ContainerAppSecondaryName = "ca-products-$ProjectName-$Environment-$sec"
+
+    # Storage Accounts (SPA static web hosting)
+    StoragePrimaryName     = "st$($ProjectName)$($Environment)$pri"
+    StorageSecondaryName   = "st$($ProjectName)$($Environment)$sec"
 
     # APIM
     ApimName = "apim-$ProjectName-$Environment-$pri"
@@ -102,8 +112,8 @@ $global:DrConfig = @{
     AutomationPrimaryName  = "aa-$ProjectName-$Environment-dr-$pri"
     AutomationSecondaryName = "aa-$ProjectName-$Environment-dr-$sec"
 
-    # Front Door endpoint for E2E validation
-    FrontDoorEndpoint = "https://fd-$ProjectName-$Environment.azurefd.net"
+    # Front Door endpoint for E2E validation (discovered dynamically below)
+    FrontDoorEndpoint = ""
 }
 
 Write-Host ""
@@ -144,6 +154,24 @@ Write-Host "[OK]   Subscription: $($ctx.Subscription.Name) ($($ctx.Subscription.
 # ── Validate Resource Connectivity ───────────────────────────────────────
 Write-Host ""
 Write-Host "[INFO] Validating resource connectivity..." -ForegroundColor Yellow
+
+# Discover Front Door endpoint hostname dynamically
+try {
+    $fdEndpoints = Get-AzFrontDoorCdnEndpoint `
+        -ResourceGroupName $global:DrConfig.FrontDoorResourceGroup `
+        -ProfileName $global:DrConfig.FrontDoorProfileName `
+        -ErrorAction Stop
+    if ($fdEndpoints -and $fdEndpoints.Count -gt 0) {
+        $global:DrConfig.FrontDoorEndpoint = "https://$($fdEndpoints[0].HostName)"
+        Write-Host "[OK]   Front Door endpoint: $($global:DrConfig.FrontDoorEndpoint)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "[WARN] No Front Door endpoints found" -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Host "[WARN] Could not discover Front Door endpoint: $($_.Exception.Message)" -ForegroundColor Yellow
+}
 
 $resources = @(
     @{ Type = "Resource Group (Primary)";   Cmd = { Get-AzResourceGroup -Name $global:DrConfig.PrimaryResourceGroup -ErrorAction Stop } }

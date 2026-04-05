@@ -179,7 +179,59 @@ foreach ($kvName in @($Config.KeyVaultPrimaryName, $Config.KeyVaultSecondaryName
 
 Write-Host ""
 
-# ── 5. Activity Logs ───────────────────────────────────────────────────
+# ── 5. App Services (Web App) ──────────────────────────────────────────
+Write-Host "[CAPTURE] App Service Status" -ForegroundColor Yellow
+foreach ($pair in @(
+    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["AppService_$($pair.Label)"] = @{
+            Name  = $pair.Name
+            State = $app.State
+            URL   = "$($pair.Name).azurewebsites.net"
+        }
+        Write-Host "  $($pair.Label): $($pair.Name) State=$($app.State)" -ForegroundColor Green
+    }
+    catch {
+        $evidence.Components["AppService_$($pair.Label)"] = @{
+            Name  = $pair.Name
+            State = "Unreachable"
+        }
+        Write-Host "  $($pair.Label): Not reachable" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+
+# ── 6. Container Apps ─────────────────────────────────────────────────
+Write-Host "[CAPTURE] Container App Status" -ForegroundColor Yellow
+foreach ($pair in @(
+    @{ Name = $Config.ContainerAppPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.ContainerAppSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $ca = Get-AzContainerApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["ContainerApp_$($pair.Label)"] = @{
+            Name              = $pair.Name
+            ProvisioningState = $ca.ProvisioningState
+            RunningStatus     = $ca.RunningStatus
+        }
+        Write-Host "  $($pair.Label): $($pair.Name) State=$($ca.ProvisioningState)" -ForegroundColor Green
+    }
+    catch {
+        $evidence.Components["ContainerApp_$($pair.Label)"] = @{
+            Name  = $pair.Name
+            State = "Unreachable"
+        }
+        Write-Host "  $($pair.Label): Not reachable" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+
+# ── 7. Activity Logs ───────────────────────────────────────────────────
 Write-Host "[CAPTURE] Activity Logs (drill window)" -ForegroundColor Yellow
 try {
     foreach ($rg in @($Config.PrimaryResourceGroup, $Config.SecondaryResourceGroup)) {
@@ -208,7 +260,7 @@ catch {
 
 Write-Host ""
 
-# ── 6. Automation Account Status (dual-region) ─────────────────────────
+# ── 8. Automation Account Status (dual-region) ─────────────────────────
 Write-Host "[CAPTURE] Automation Accounts (dual-region)" -ForegroundColor Yellow
 foreach ($pair in @(
     @{ Name = $Config.AutomationPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }

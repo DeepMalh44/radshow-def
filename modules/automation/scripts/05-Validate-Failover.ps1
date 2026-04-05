@@ -186,7 +186,51 @@ catch {
 
 Write-Output ""
 
-# ── 6. APIM Gateway Health ──────────────────────────────────────────────────
+# ── 6. App Service (Web App) Status ────────────────────────────────────────
+Write-Output "[VALIDATE] App Service (Web App) Status"
+$expectedActiveAppSvc = if ($OperationType -eq "failover") { $Config.AppServiceSecondaryName } else { $Config.AppServicePrimaryName }
+$expectedActiveAppSvcRG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
+
+try {
+    $appSvc = Get-AzWebApp -ResourceGroupName $expectedActiveAppSvcRG -Name $expectedActiveAppSvc -ErrorAction Stop
+    $running = $appSvc.State -eq "Running"
+    $validationResults += @{
+        Check  = "Active App Service"
+        Pass   = $running
+        Detail = "$expectedActiveAppSvc State=$($appSvc.State)"
+    }
+    Write-Output "  $expectedActiveAppSvc : $($appSvc.State) $(if ($running) {'[PASS]'} else {'[FAIL]'})"
+}
+catch {
+    $validationResults += @{ Check = "Active App Service"; Pass = $false; Detail = $_.Exception.Message }
+    Write-Warning "  [FAIL] $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 7. Container App Status ────────────────────────────────────────────────
+Write-Output "[VALIDATE] Container App Status"
+$expectedActiveCA = if ($OperationType -eq "failover") { $Config.ContainerAppSecondaryName } else { $Config.ContainerAppPrimaryName }
+$expectedActiveCA_RG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
+
+try {
+    $ca = Get-AzContainerApp -ResourceGroupName $expectedActiveCA_RG -Name $expectedActiveCA -ErrorAction Stop
+    $caHealthy = $ca.ProvisioningState -eq "Succeeded"
+    $validationResults += @{
+        Check  = "Active Container App"
+        Pass   = $caHealthy
+        Detail = "$expectedActiveCA ProvisioningState=$($ca.ProvisioningState)"
+    }
+    Write-Output "  $expectedActiveCA : $($ca.ProvisioningState) $(if ($caHealthy) {'[PASS]'} else {'[FAIL]'})"
+}
+catch {
+    $validationResults += @{ Check = "Active Container App"; Pass = $false; Detail = $_.Exception.Message }
+    Write-Warning "  [FAIL] $($_.Exception.Message)"
+}
+
+Write-Output ""
+
+# ── 8. APIM Gateway Health ──────────────────────────────────────────────────
 Write-Output "[VALIDATE] API Management Gateway"
 try {
     $apim = Get-AzApiManagement -ResourceGroupName $Config.ApimResourceGroup -Name $Config.ApimName -ErrorAction Stop

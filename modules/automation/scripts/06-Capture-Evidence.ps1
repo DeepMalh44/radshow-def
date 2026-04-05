@@ -179,7 +179,51 @@ catch {
 
 Write-Output ""
 
-# ── 5. Activity Logs ───────────────────────────────────────────────────────
+# ── 5. App Services (Web App) ──────────────────────────────────────────────
+Write-Output "[CAPTURE] App Service Status"
+foreach ($pair in @(
+    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["AppService_$($pair.Label)"] = @{
+            Name  = $pair.Name
+            State = $app.State
+        }
+        Write-Output "  $($pair.Label): $($pair.Name) State=$($app.State)"
+    }
+    catch {
+        $evidence.Components["AppService_$($pair.Label)"] = @{ Name = $pair.Name; State = "Unreachable" }
+        Write-Output "  $($pair.Label): Not reachable"
+    }
+}
+
+Write-Output ""
+
+# ── 6. Container Apps ─────────────────────────────────────────────────────
+Write-Output "[CAPTURE] Container App Status"
+foreach ($pair in @(
+    @{ Name = $Config.ContainerAppPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.ContainerAppSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $ca = Get-AzContainerApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["ContainerApp_$($pair.Label)"] = @{
+            Name              = $pair.Name
+            ProvisioningState = $ca.ProvisioningState
+        }
+        Write-Output "  $($pair.Label): $($pair.Name) State=$($ca.ProvisioningState)"
+    }
+    catch {
+        $evidence.Components["ContainerApp_$($pair.Label)"] = @{ Name = $pair.Name; State = "Unreachable" }
+        Write-Output "  $($pair.Label): Not reachable"
+    }
+}
+
+Write-Output ""
+
+# ── 7. Activity Logs ───────────────────────────────────────────────────────
 Write-Output "[CAPTURE] Activity Logs (drill window)"
 try {
     foreach ($rg in @($Config.PrimaryResourceGroup, $Config.SecondaryResourceGroup)) {

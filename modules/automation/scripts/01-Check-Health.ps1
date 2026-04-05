@@ -149,7 +149,55 @@ foreach ($name in @($Config.FuncAppPrimaryName, $Config.FuncAppSecondaryName)) {
 
 Write-Output ""
 
-# ── 6. API Management ──────────────────────────────────────────────────────
+# ── 6. App Services (Web App) ──────────────────────────────────────────────
+Write-Output "[CHECK] App Services (Web App)"
+foreach ($pair in @(
+    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $running = $app.State -eq "Running"
+        $results += @{
+            Component = "AppService ($($pair.Label))"
+            Status    = if ($running) { "Healthy" } else { "Warning" }
+            Detail    = "State=$($app.State)"
+        }
+        Write-Output "  $($pair.Name): $($app.State)"
+    }
+    catch {
+        $results += @{ Component = "AppService ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message }
+        Write-Warning "  $($pair.Name): $($_.Exception.Message)"
+    }
+}
+
+Write-Output ""
+
+# ── 7. Container Apps ──────────────────────────────────────────────────────
+Write-Output "[CHECK] Container Apps"
+foreach ($pair in @(
+    @{ Name = $Config.ContainerAppPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.ContainerAppSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $ca = Get-AzContainerApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $healthy = $ca.ProvisioningState -eq "Succeeded"
+        $results += @{
+            Component = "ContainerApp ($($pair.Label))"
+            Status    = if ($healthy) { "Healthy" } else { "Warning" }
+            Detail    = "State=$($ca.ProvisioningState)"
+        }
+        Write-Output "  $($pair.Name): $($ca.ProvisioningState)"
+    }
+    catch {
+        $results += @{ Component = "ContainerApp ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message }
+        Write-Warning "  $($pair.Name): $($_.Exception.Message)"
+    }
+}
+
+Write-Output ""
+
+# ── 8. API Management ──────────────────────────────────────────────────────
 Write-Output "[CHECK] API Management: $($Config.ApimName)"
 try {
     $apim = Get-AzApiManagement -ResourceGroupName $Config.ApimResourceGroup -Name $Config.ApimName -ErrorAction Stop

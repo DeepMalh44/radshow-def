@@ -48,16 +48,32 @@ $global:DrConfig = @{
     RedisSecondaryName     = "redis-$ProjectName-$Environment-ncus"
 
     # Front Door
-    FrontDoorProfileName   = "fd-$ProjectName-$Environment"
+    FrontDoorProfileName   = "afd-$ProjectName-$Environment"
     FrontDoorResourceGroup = "rg-$ProjectName-$Environment-scus"
 
-    # Key Vault
-    KeyVaultName           = "kv-$ProjectName-$Environment"
+    # Key Vault (dual-region)
+    KeyVaultName           = "kv-$ProjectName-$Environment-scus"
     KeyVaultResourceGroup  = "rg-$ProjectName-$Environment-scus"
+    KeyVaultPrimaryName         = "kv-$ProjectName-$Environment-scus"
+    KeyVaultPrimaryResourceGroup = "rg-$ProjectName-$Environment-scus"
+    KeyVaultSecondaryName         = "kv-$ProjectName-$Environment-ncus"
+    KeyVaultSecondaryResourceGroup = "rg-$ProjectName-$Environment-ncus"
 
     # Function Apps
     FuncAppPrimaryName     = "func-$ProjectName-$Environment-scus"
     FuncAppSecondaryName   = "func-$ProjectName-$Environment-ncus"
+
+    # App Services (web app)
+    AppServicePrimaryName  = "app-$ProjectName-$Environment-scus"
+    AppServiceSecondaryName = "app-$ProjectName-$Environment-ncus"
+
+    # Container Apps
+    ContainerAppPrimaryName  = "ca-products-$ProjectName-$Environment-scus"
+    ContainerAppSecondaryName = "ca-products-$ProjectName-$Environment-ncus"
+
+    # Storage Accounts (SPA static web hosting)
+    StoragePrimaryName     = "st$($ProjectName)$($Environment)scus"
+    StorageSecondaryName   = "st$($ProjectName)$($Environment)ncus"
 
     # API Management
     ApimName               = "apim-$ProjectName-$Environment-scus"
