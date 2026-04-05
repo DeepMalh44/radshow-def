@@ -6,10 +6,12 @@ RAD Showcase is a **multi-region, DR-capable web application** hosted on Azure. 
 
 - **SPA** (Vue 3) — a product catalog UI served from Azure Blob Storage via Azure Front Door
 - **API** (.NET 8 Function App) — a containerized REST API returning product data from SQL Managed Instance
-- **APIM** — Azure API Management gateway sitting between Front Door and the Function App
+- **Products API** (Container App) — a .NET API running in internal Container App Environments, accessed via APIM
+- **Products Web UI** (App Service) — a .NET 8 MVC app at `/app/Products` for product management, served via Front Door `og-app` origin group
+- **APIM** — Azure API Management gateway sitting between Front Door and compute backends (Function App + Container Apps)
 - **SQL MI** — Azure SQL Managed Instance with automatic Failover Group replication to a secondary region
 
-The SPA calls `/api/products` through Front Door → APIM → Function App → SQL MI. All authentication uses **Entra ID managed identities** (zero passwords).
+The SPA calls `/api/products` through Front Door → APIM → Function App → SQL MI. The Products web UI is at `/app/Products` through Front Door → App Service → APIM + SQL MI (FOG). All authentication uses **Entra ID managed identities** (zero passwords).
 
 ---
 
@@ -77,7 +79,7 @@ Duration: ~2-4 hours (SQL MI creation is the bottleneck)
 **Pipeline:** `migrate.yml`  
 **What it does:**
 1. Creates the `radshow` database on the primary SQL MI
-2. **Grants SQL access** to all 4 managed identities (func-app primary/secondary, app-service primary/secondary)
+2. **Grants SQL access** to all 6 managed identities (func-app primary/secondary, app-service primary/secondary, container-app primary/secondary)
 3. Creates `__migration_history` tracking table
 4. Runs all pending `V###__*.sql` migration files
 
@@ -206,6 +208,7 @@ Each module folder can override `_envcommon` defaults. Common overrides:
      ┌─────────────────┐     ┌─────────────────┐
      │ Primary Region   │     │ Secondary Region │
      │  APIM → Func App │     │  Func App        │
+     │  APIM → Cont.App │     │  Container App   │
      │  App Service      │     │  App Service     │
      │  SQL MI (Read/W)  │     │  SQL MI (Read)   │
      │  Redis            │     │  Redis           │
@@ -222,7 +225,9 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 | Component | Failover Mechanism |
 |---|---|
 | **SQL MI** | Failover Group — switches read-write to secondary |
-| **Front Door** | Origin priority swap — secondary becomes P1 |
+| **Front Door** | Origin priority swap — secondary becomes P1 (og-api, og-spa, og-app all swapped) |
+| **Container Apps** | Uses FOG listener endpoint — automatically connects to new primary after SQL MI failover |
+| **App Service** | Uses FOG listener + og-app priority swap — traffic routed to secondary App Service |
 | **Key Vault** | `active-region` secret updated to secondary |
 | **Redis** | Geo-replicated — both regions always active |
 | **Storage** | Both regions have SPA files — FD routes traffic |
@@ -337,8 +342,11 @@ The SPA only performs **planned (graceful) failover**. It does NOT support `Allo
 | What | URL |
 |---|---|
 | SPA | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/` |
+| Products Web UI | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products` |
+| Products Create Page | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products/Create` |
 | API (via Front Door) | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/products` |
 | API (via APIM direct) | `https://apim-radshow-stg01-cin.azure-api.net/api/products` |
+| Products API (via APIM) | `https://apim-radshow-stg01-cin.azure-api.net/products` |
 | API (Function App direct) | `https://func-radshow-stg01-cin.azurewebsites.net/api/products` |
 
 Quick test:
@@ -356,12 +364,13 @@ GitHub Actions  ──OIDC──►  Azure AD (sp-radshow-cicd)  ──RBAC─�
                                                                          │
 Function App  ──System MI──►  SQL MI (Entra-only auth)                   │
 App Service   ──System MI──►  Key Vault (RBAC)                          │
+Container App ──System MI──►  SQL MI (FOG listener)                     │
                               Redis                                      │
                               Storage                                    │
 ```
 
 - **No passwords anywhere.** GitHub → Azure uses OIDC federation. Apps → backends use system-assigned managed identities.
-- SQL MI is **Entra-only** (SQL auth disabled). The CI/CD SP (`sp-radshow-cicd`) is the SQL admin and grants access to app managed identities during the `radshow-db` migration pipeline.
+- SQL MI is **Entra-only** (SQL auth disabled). The CI/CD SP (`sp-radshow-cicd`) is the SQL admin and grants access to app managed identities (Function App, App Service, Container App) during the `radshow-db` migration pipeline.
 
 ---
 

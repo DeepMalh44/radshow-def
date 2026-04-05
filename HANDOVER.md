@@ -14,9 +14,11 @@
 ## Architecture
 
 - **Active-Passive DR** across two Azure regions per environment
-- **Azure Front Door** (Premium) routes traffic: `og-api` → APIM gateways, `og-spa` → Storage static sites
-- **APIM** proxies all API calls to backend Function Apps (per-region)
-- **SQL MI Failover Group** replicates databases across regions
+- **Azure Front Door** (Premium) routes traffic: `og-api` → APIM gateways, `og-spa` → Storage static sites, `og-app` → App Service (Products web UI)
+- **APIM** proxies all API calls to backend Function Apps (per-region) and routes `/products` to Container Apps (Products API)
+- **App Service** serves the Products web UI at `/app/Products` (calls APIM internally for data, connects to SQL MI via FOG listener)
+- **Container Apps** run the Products API (`ca-product-api`) in internal (VNet-integrated) Container App Environments with auto-managed private DNS zones
+- **SQL MI Failover Group** replicates databases across regions; all compute (Function App, App Service, Container Apps) uses the FOG listener endpoint
 - **Redis Cache** deployed independently per region
 
 ### Environments
@@ -131,7 +133,7 @@ export PRD01_TENANT_ID="your-tenant-id"
 | radshow-lic | `RESOURCE_GROUP` |
 | radshow-api | `ACR_NAME`, `FUNC_APP_NAME`, `RESOURCE_GROUP`, `FUNC_APP_SECONDARY_NAME`, `RESOURCE_GROUP_SECONDARY` |
 | radshow-spa | `STORAGE_ACCOUNT_NAME`, `STORAGE_ACCOUNT_SECONDARY_NAME`, `RESOURCE_GROUP`, `FRONT_DOOR_RESOURCE_GROUP`, `FRONT_DOOR_PROFILE_NAME`, `FRONT_DOOR_ENDPOINT_NAME` |
-| radshow-db | `FUNC_APP_NAME`, `FUNC_APP_SECONDARY_NAME`, `APP_SERVICE_NAME`, `APP_SERVICE_SECONDARY_NAME` |
+| radshow-db | `FUNC_APP_NAME`, `FUNC_APP_SECONDARY_NAME`, `APP_SERVICE_NAME`, `APP_SERVICE_SECONDARY_NAME`, `CONTAINER_APP_NAME`, `CONTAINER_APP_SECONDARY_NAME` |
 | radshow-apim | `RESOURCE_GROUP`, `APIM_NAME` |
 
 #### Secrets that must be set MANUALLY after infrastructure is provisioned
@@ -179,7 +181,7 @@ terragrunt apply --all --non-interactive \
 Push to `main` branch in this order:
 
 1. **radshow-api** — Builds Docker image → ACR → deploys to both Function Apps
-2. **radshow-db** — Runs EF Core migrations against SQL MI, grants managed identity access
+2. **radshow-db** — Runs EF Core migrations against SQL MI, grants managed identity access to Function App, App Service, AND Container App identities
 3. **radshow-spa** — Builds Vue app → uploads to both Storage `$web` containers → purges Front Door cache
 4. **radshow-apim** — Publishes API definitions, policies, and named values to APIM
 
@@ -230,6 +232,11 @@ az role assignment create --assignee-object-id $PRINCIPAL_ID \
 | Decision | Rationale |
 |----------|-----------|
 | **Docker containers on Function Apps** | CI/CD deploys container images via `az functionapp config container set`, not zip deploy. Terraform ignores `application_stack` drift via `lifecycle.ignore_changes`. |
+| **Container Apps (Products API)** | Internal CAE with VNet integration. APIM routes `/products` to Container Apps. Private DNS zones auto-created by Terraform when `internal_load_balancer_enabled = true`. |
+| **App Service (`og-app`)** | Front Door `/app/*` route to App Service origin group. `ASPNETCORE_PATHBASE=/app` for path-based routing. Connects to SQL MI via FOG listener. |
+| **FOG listener for all compute** | Function App, App Service, and Container Apps all use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
+| **APIM subscriptionRequired off** | `radshow-product-api` has `subscriptionRequired: false` so Container Apps and App Service can call it without a subscription key. |
+| **`cicd_sp_object_id` in env.hcl** | Centralized CICD service principal Object ID used by `role-assignments` module across all environments. |
 | **OIDC (no secrets)** | GitHub Actions authenticate to Azure via Workload Identity Federation — no client secrets to rotate. |
 | **Terragrunt wraps Terraform** | `radshow-def` has reusable modules; `radshow-lic` has per-environment wiring with dependency management. |
 | **APIOps for APIM** | APIM policies/APIs managed as code in `radshow-apim`, published via pipeline (not Terraform). |
@@ -273,3 +280,6 @@ State is shared across all environments. The storage account is **not managed by
 | KV access denied (403) | KVs are locked down. Temporarily enable public access, perform operation, then re-lock. |
 | SPA shows stale content | Purge Front Door cache: `az afd endpoint purge ... --content-paths "/*"` |
 | Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
+| Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard + apex A records pointing to CAE static IP. Check VNet links include all relevant VNets. |
+| Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
+| App Service can't reach SQL MI | Verify `DefaultConnection` uses FOG listener endpoint, not direct SQL MI FQDN. Check that `migrate.yml` granted SQL access to App Service managed identity. |

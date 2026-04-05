@@ -17,67 +17,76 @@ Multi-region, DR-capable Azure application with full CI/CD automation across 6 r
                           │                  afd-radshow-{env}                       │
                           │                                                          │
                           │   ep-spa (single endpoint)                               │
-                          │     ├─ route-spa  (/*   ) ──► og-spa                    │
-                          │     └─ route-api  (/api/*) ──► og-api                    │
-                          └──────────┬─────────────────────────────┬─────────────────┘
-                                     │                             │
-                         ┌───────────▼──────────┐     ┌───────────▼──────────────┐
-                         │    og-spa origins     │     │      og-api origins      │
-                         │  (Azure Storage $web) │     │    (APIM Gateway)        │
-                         └───────────┬───────────┘     └───────────┬──────────────┘
-                                     │                             │
-               ┌─────────────────────▼────────┐     ┌─────────────▼──────────────┐
-               │   STORAGE ACCOUNT ($web)      │     │  API MANAGEMENT (Premium)  │
-               │   stradshow{env}{region}      │     │  apim-radshow-{env}        │
-               │                               │     │                            │
-               │   Vue 3 SPA static files      │     │  radshow-api  (path: /api) │
-               │   - index.html                │     │    ├─ /products  (CRUD)    │
-               │   - assets/js, css            │     │    ├─ /status              │
-               │   - All API calls via /api    │     │    ├─ /healthz             │
-               └───────────────────────────────┘     │    └─ /failover            │
-                                                     │                            │
-                                                     │  Policy: region-aware      │
-                                                     │  backend selection via      │
-                                                     │  named values              │
-                                                     └─────────────┬──────────────┘
-                                                                   │
-                                                     ┌─────────────▼──────────────┐
-                                                     │  AZURE FUNCTION APP        │
-                                                     │  func-radshow-{env}        │
-                                                     │  (.NET 8 Isolated)         │
-                                                     │                            │
-                                                     │  Container from ACR        │
-                                                     │  Managed Identity auth     │
-                                                     └──┬──────┬──────┬──────┬────┘
-                                                        │      │      │      │
-                             ┌───────────────────┐      │      │      │      │
-                             │  SQL MI            │◄─────┘      │      │      │
-                             │  (Failover Group)  │             │      │      │
-                             └───────────────────┘              │      │      │
-                             ┌───────────────────┐              │      │      │
-                             │  Redis Cache       │◄────────────┘      │      │
-                             │  (Premium)         │                    │      │
-                             └───────────────────┘                     │      │
-                             ┌───────────────────┐                     │      │
-                             │  Key Vault         │◄───────────────────┘      │
-                             └───────────────────┘                            │
-                             ┌───────────────────┐                            │
-                             │  Storage Account   │◄──────────────────────────┘
-                             │  (RA-GZRS)         │
-                             └───────────────────┘
+                          │     ├─ route-spa  (/*    ) ──► og-spa                   │
+                          │     ├─ route-api  (/api/*) ──► og-api                   │
+                          │     └─ route-app  (/app/*) ──► og-app                   │
+                          └──────┬──────────────────┬──────────────────┬─────────────┘
+                                 │                  │                  │
+                     ┌───────────▼──────┐ ┌────────▼────────┐ ┌──────▼──────────────┐
+                     │  og-spa origins  │ │  og-api origins  │ │   og-app origins    │
+                     │ (Storage $web)   │ │ (APIM Gateway)   │ │ (App Service)       │
+                     └───────┬──────────┘ └────────┬────────┘ └──────┬──────────────┘
+                             │                     │                 │
+           ┌─────────────────▼────────┐  ┌─────────▼──────────┐  ┌──▼──────────────────┐
+           │ STORAGE ACCOUNT ($web)   │  │ API MANAGEMENT     │  │ APP SERVICE          │
+           │ stradshow{env}{region}   │  │ apim-radshow-{env} │  │ app-radshow-{env}    │
+           │                          │  │                    │  │ (.NET 8 MVC)         │
+           │ Vue 3 SPA static files   │  │ radshow-api (/api) │  │                      │
+           │ - index.html             │  │  ├─ /products CRUD │  │ Products web UI      │
+           │ - assets/js, css         │  │  ├─ /status        │  │ /app/Products        │
+           │ - API calls via /api     │  │  ├─ /healthz       │  │ /app/Products/Create │
+           └──────────────────────────┘  │  └─ /failover      │  │                      │
+                                         │                    │  │ Calls APIM for data  │
+                                         │ radshow-product-api│  │ Connects to SQL MI   │
+                                         │  └─ /products CRUD │  │ via FOG listener     │
+                                         │    (Container App) │  └──┬───────────────────┘
+                                         └──────┬─────┬───────┘     │
+                                                │     │             │
+                                  ┌─────────────▼──┐  │             │
+                                  │ FUNCTION APP   │  │             │
+                                  │ func-radshow   │  │             │
+                                  │ (.NET 8 Isol.) │  │             │
+                                  │ Container/ACR  │  │             │
+                                  └─┬──┬──┬──┬─────┘  │             │
+                                    │  │  │  │        │             │
+                 ┌──────────────┐    │  │  │  │  ┌─────▼───────────┐ │
+                 │ SQL MI       │◄───┘  │  │  │  │ CONTAINER APP   │ │
+                 │ (FOG)        │◄──────────────┤ │ Products API   │ │
+                 └──────────────┘    │  │  │    │ │ ca-product-api  │ │
+                 ┌──────────────┐    │  │  │    │ │ (Internal CAE) │ │
+                 │ Redis Cache  │◄───┘  │  │    │ └────────────────┘ │
+                 │ (Premium)    │       │  │    │                    │
+                 └──────────────┘       │  │    │ ┌─ Private DNS ──┐ │
+                 ┌──────────────┐       │  │    │ │ *.{cae-domain} │ │
+                 │ Key Vault    │◄──────┘  │    │ │ → static IP    │ │
+                 └──────────────┘          │    │ └────────────────┘ │
+                 ┌──────────────┐          │    │                    │
+                 │ Storage      │◄─────────┘    │                    │
+                 │ (RA-GZRS)    │               └────────────────────┘
+                 └──────────────┘
+
+  All compute (Function App, Container App, App Service) connects to
+  SQL MI via the Failover Group listener endpoint for automatic DR.
 ```
 
-### Request path (every API call)
+### Request paths
 
 ```
   Browser ──► Front Door (/api/*) ──► APIM Gateway ──► Function App ──► SQL MI / Redis / etc.
+                 │           │
+                 │           └──► Front Door (/app/*) ──► App Service ──► APIM + SQL MI (FOG)
                  │
                  └──► Front Door (/*) ──► Storage $web (SPA static files)
+
+  APIM /products path:  APIM ──► Container App (Products API) ──► SQL MI (FOG listener)
 ```
 
 **There are zero direct calls from the SPA to any backend.** All API traffic flows through
 Front Door and APIM. The SPA uses relative paths (`/api/products`, `/api/status`, etc.) which
 Front Door routes to APIM based on the `/api/*` pattern match.
+
+**Products web UI** is served by App Service at `/app/Products` via the `og-app` origin group.
+The App Service calls APIM internally for product data and connects to SQL MI via the FOG listener.
 
 ---
 
@@ -151,6 +160,7 @@ locals {
   primary_short      = "<PRIMARY_SHORT>"         # e.g. "swc"
   secondary_short    = "<SECONDARY_SHORT>"       # e.g. "gwc"
   name_prefix        = "radshow-{env}"
+  cicd_sp_object_id  = "<CICD_SP_OBJECT_ID>"     # Object ID of sp-radshow-cicd service principal
 }
 ```
 
@@ -203,6 +213,8 @@ No additional secrets — subscription/tenant come from `env.hcl`.
 |--------|-------|
 | `SQL_SERVER` | SQL MI FQDN |
 | `SQL_DATABASE` | Database name (e.g. `radshowdb`) |
+| `CONTAINER_APP_NAME` | Primary Container App name (e.g. `ca-product-api-radshow-stg01-cin`) |
+| `CONTAINER_APP_SECONDARY_NAME` | Secondary Container App name (STG01/PRD01 only) |
 
 ### Step 5: Deploy Infrastructure (radshow-lic)
 
@@ -323,7 +335,7 @@ since infrastructure dependencies are already in place.
 | `apim` | API Management Premium with multi-region gateway |
 | `app-service` | App Service Plans |
 | `function-app` | Azure Functions on Linux with VNet integration |
-| `container-apps` | ACA Environment + Container Apps |
+| `container-apps` | ACA Environment + Container Apps + Private DNS zones for internal environments |
 | `container-instances` | Azure Container Instances |
 | `container-registry` | ACR with geo-replication |
 | `sql-mi` | SQL Managed Instance + Failover Groups |
@@ -362,6 +374,13 @@ PRD01 pins to a tagged release (`?ref=v1.0.0`). Create tags via `validate.yml` w
 - **Terraform state** — stored in Azure Storage with AAD auth (`use_azuread_auth = true`)
 - **Environment approval gates** — all repos have required reviewer (DeepMalh44) on DEV01, STG01, PRD01 environments
 - **DR Operations Guide** — see [radshow-lic/docs/DR-OPERATIONS-GUIDE.md](https://github.com/DeepMalh44/radshow-lic/blob/main/docs/DR-OPERATIONS-GUIDE.md) for failover procedures, KV secrets, and troubleshooting
+- **App Service (`og-app`)** — Front Door `route-app` routes `/app/*` to App Service origin group; App Service sets `ASPNETCORE_PATHBASE=/app` and calls APIM internally for product data
+- **Container Apps (Products API)** — APIM `radshow-product-api` routes `/products` to internal Container Apps (`ca-product-api-radshow-{env}`); uses VNet-integrated internal CAE with auto-managed private DNS zones
+- **FOG listener for all compute** — Function App, App Service, and Container Apps all connect to SQL MI via the Failover Group listener endpoint (not the direct SQL MI FQDN); this ensures automatic DR failover
+- **Container App DNS zones** — when `internal_load_balancer_enabled = true`, the `container-apps` module auto-creates a private DNS zone, wildcard + apex A records, and VNet links (controlled by `vnet_ids_for_dns_link` variable)
+- **APIM subscriptionRequired** — `radshow-product-api` has `subscriptionRequired: false` so Container Apps and App Service can call it without a subscription key
+- **`cicd_sp_object_id` in env.hcl** — centralized CICD service principal Object ID used by `role-assignments` module; avoids hardcoding across per-module configs
+- **radshow-db grants Container App identities** — `migrate.yml` grants SQL access to Function App, App Service, AND Container App managed identities in all environments
 
 ---
 

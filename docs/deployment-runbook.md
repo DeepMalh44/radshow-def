@@ -34,6 +34,7 @@ locals {
   secondary_location = "germanywestcentral" # change as needed
   enable_dr          = false               # true for STG/PRD
   enable_waf         = false               # true for PRD
+  cicd_sp_object_id  = "YOUR-CICD-SP-OBJECT-ID"  # Object ID of sp-radshow-cicd
   # ... SKU sizes, feature flags
 }
 ```
@@ -110,11 +111,12 @@ terragrunt run-all apply
 - Resource groups (primary + secondary if DR enabled)
 - VNet + subnets + NSGs + private DNS zones
 - VNet peering (if 2 regions)
-- Front Door Premium with single `ep-spa` endpoint + WAF policy
+- Front Door Premium with single `ep-spa` endpoint + WAF policy + 3 routes (`route-spa`, `route-api`, `route-app`)
 - APIM (Premium Classic, multi-region if enabled)
 - Function App with `container_registry_use_managed_identity = true`
 - App Service Plan (EP1)
-- Container App Environment + Container Apps
+- App Service with `ASPNETCORE_PATHBASE=/app`, APIM gateway URL, FOG listener
+- Container App Environment + Container Apps (Products API) with internal VNet integration + private DNS zones
 - ACR (Premium, geo-replicated if enabled)
 - SQL MI + failover group
 - Redis (Premium, geo-replicated if enabled)
@@ -127,6 +129,7 @@ terragrunt run-all apply
   - Function App MI → Key Vault Secrets User
   - Function App MI → Storage Blob Data Contributor
   - Function App MI → **AcrPull** on ACR
+  - CICD SP (`cicd_sp_object_id`) → Contributor on RG
   - (Same for App Service MI and secondary region identities)
 
 ---
@@ -212,11 +215,13 @@ git push origin main
 
 ```bash
 cd radshow-db
-# Run migrations against SQL MI
-# Connection uses Managed Identity from a jumpbox or pipeline agent in the VNet
-sqlcmd -S sqlmi-radshow-dev02.{hash}.database.windows.net -d radshowdb -G -i migrations/V001__create_products_table.sql
-sqlcmd -S sqlmi-radshow-dev02.{hash}.database.windows.net -d radshowdb -G -i migrations/V002__seed_sample_data.sql
+# Run migrations against SQL MI (uses FOG listener endpoint)
+# The pipeline also grants SQL access to Function App, App Service, AND Container App managed identities
+sqlcmd -S fog-radshow-dev02.database.windows.net -d radshowdb -G -i migrations/V001__create_products_table.sql
+sqlcmd -S fog-radshow-dev02.database.windows.net -d radshowdb -G -i migrations/V002__seed_sample_data.sql
 ```
+
+> **Note**: The `migrate.yml` CI/CD pipeline automatically grants SQL access to all 6 managed identities: func-app primary/secondary, app-service primary/secondary, container-app primary/secondary.
 
 ---
 
@@ -238,6 +243,14 @@ curl https://ep-spa-{hash}.{zone}.azurefd.net/api/status
 # SPA
 curl -sI https://ep-spa-{hash}.{zone}.azurefd.net/
 # Expected: 200 with HTML containing "RAD Showcase"
+
+# Products web UI (via App Service)
+curl -sI https://ep-spa-{hash}.{zone}.azurefd.net/app/Products
+# Expected: 200 with product listing HTML
+
+# Products API (via APIM)
+curl https://apim-radshow-dev02-{region}.azure-api.net/products
+# Expected: 200 JSON array of products
 ```
 
 ---
@@ -277,3 +290,19 @@ az account get-access-token --query accessToken -o tsv | cut -d. -f2 | base64 -d
 # Use --assignee-object-id instead of --assignee
 az role assignment create --assignee-object-id {YOUR_OID} --assignee-principal-type User --role "Storage Blob Data Contributor" --scope {resource-id}
 ```
+
+### Container App DNS resolution fails (internal CAE)
+If the Container App can't be reached from APIM or other VNet resources:
+1. Verify the private DNS zone exists matching the CAE default domain
+2. Check wildcard (`*`) and apex (`@`) A records point to the CAE static IP
+3. Verify VNet links exist for all relevant VNets (primary + secondary)
+4. The `container-apps` module does this automatically when `internal_load_balancer_enabled = true`
+
+### Products page HTTP 500
+Three common causes:
+1. **APIM subscription key required**: Ensure `radshow-product-api` has `subscriptionRequired: false` in `radshow-apim`
+2. **Missing DNS zones**: Internal CAE needs private DNS zones (see above)
+3. **SQL MI access denied**: Run `migrate.yml` to grant SQL access to Container App managed identities
+
+### App Service can't connect to SQL MI
+Verify `DefaultConnection` uses the FOG listener endpoint (`fog-radshow-{env}.database.windows.net`), not the direct SQL MI FQDN. Ensure `migrate.yml` granted SQL access to the App Service managed identity.

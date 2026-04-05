@@ -42,14 +42,15 @@
 
 ## Front Door Routing
 
-Single endpoint `ep-spa` with two routes:
+Single endpoint `ep-spa` with three routes:
 
 ```
 route-spa  →  /*       →  Storage origin group (SPA static files)
-route-api  →  /api/*   →  Function App origin group (API backend)
+route-api  →  /api/*   →  APIM origin group (API backend)
+route-app  →  /app/*   →  App Service origin group (Products web UI)
 ```
 
-Both origin groups use active-passive: primary (priority=1), secondary (priority=2).
+All three origin groups use active-passive: primary (priority=1), secondary (priority=2).
 
 > **Previous bug**: Had 2 endpoints (`ep-api` + `ep-spa`). SPA made relative `/api/*` calls which hit Storage instead of Function App. Fixed by consolidating to single endpoint. Applied to all 3 envs in `radshow-lic`.
 
@@ -96,9 +97,12 @@ az functionapp restart --name func-radshow-dev01 --resource-group rg-radshow-dev
 | `func-kv-secrets` | Key Vault Secrets User | Function App MI | Key Vault |
 | `func-storage-blob-contributor` | Storage Blob Data Contributor | Function App MI | Storage |
 | `func-acr-pull` | AcrPull | Function App MI | ACR |
+| `cicd-sp-contributor` | Contributor | CICD SP (`cicd_sp_object_id`) | Resource Group |
 
 ### STG01/PRD01
 Same as DEV01 plus secondary region equivalents (app-sec-*, func-sec-*) for secondary Function Apps, Key Vaults, and Storage accounts. All secondary Function Apps also get `AcrPull` on the same ACR (geo-replicated).
+
+> **`cicd_sp_object_id`** is now defined in each `env.hcl` and referenced by the `role-assignments` module, avoiding hardcoded SP IDs in per-module configs.
 
 ---
 
@@ -117,11 +121,54 @@ Same as DEV01 plus secondary region equivalents (app-sec-*, func-sec-*) for seco
 
 ### Function App app_settings (from Terragrunt)
 ```
-SqlConnection       = Server={sqlmi-fqdn};Database=radshowdb;Authentication=Active Directory Managed Identity;...
+SqlConnection       = Server=tcp:fog-radshow-{env}.database.windows.net;Database=radshowdb;Authentication=Active Directory Managed Identity;...
 KeyVault__VaultUri   = https://kv-radshow-{env}-{region}.vault.azure.net/
 Storage__AccountName = stradshow{env}{region}
 Redis__ConnectionString = {hostname}:{ssl_port},password={key},ssl=True,abortConnect=False
+FRONT_DOOR_ORIGIN_GROUP_NAME = og-app
+APIM_GATEWAY_URL     = https://apim-radshow-{env}-{region}.azure-api.net
 ```
+
+> **Note**: `SqlConnection` uses the FOG listener endpoint (`fog-radshow-{env}`) not the direct SQL MI FQDN. This applies to Function App, App Service, and Container Apps.
+
+---
+
+## Container Apps (Products API)
+
+The Products API runs as a Container App (`ca-product-api-radshow-{env}-{region}`) inside an **internal** Container App Environment:
+
+- **Internal CAE**: VNet-integrated, `internal_load_balancer_enabled = true`
+- **Private DNS**: Terraform auto-creates a private DNS zone matching the CAE default domain (e.g., `happysea-a428f96b.centralindia.azurecontainerapps.io`) with wildcard + apex A records pointing to the CAE static IP
+- **VNet links**: Controlled by `vnet_ids_for_dns_link` variable — links DNS zone to primary + secondary VNets
+- **SQL connection**: Uses FOG listener endpoint (`Server=tcp:fog-radshow-{env}.database.windows.net...`)
+- **APIM routing**: APIM `radshow-product-api` routes `/products` to the Container App's internal FQDN
+- **`subscriptionRequired: false`**: The product API in APIM does not require a subscription key
+
+### Container App Environments (STG01 example)
+
+| Region | CAE Name | Domain | Static IP |
+|---|---|---|---|
+| centralindia | `cae-radshow-stg01-cin` | `happysea-a428f96b.centralindia.azurecontainerapps.io` | `10.1.4.240` |
+| southindia | `cae-radshow-stg01-sin` | `mangosea-b9cd4f1e.southindia.azurecontainerapps.io` | `10.2.5.130` |
+
+---
+
+## App Service (Products Web UI)
+
+App Service (`app-radshow-{env}-{region}`) serves the Products web UI:
+
+- **Front Door routing**: `route-app` matches `/app/*` and routes to `og-app` origin group (active-passive)
+- **Path base**: `ASPNETCORE_PATHBASE=/app` configured as app setting
+- **Backend calls**: App Service calls APIM gateway (`APIM_GATEWAY_URL`) for product data
+- **SQL connection**: Uses FOG listener endpoint for `DefaultConnection`
+- **Region awareness**: `AZURE_REGION` app setting set from `env.hcl`
+
+### Key URLs
+| Path | Purpose |
+|---|---|
+| `/app/Products` | Product listing page |
+| `/app/Products/Create` | Product creation form |
+| `/app/Products/Edit/{id}` | Product edit form |
 
 ---
 
@@ -164,6 +211,8 @@ Redis__ConnectionString = {hostname}:{ssl_port},password={key},ssl=True,abortCon
 | Function App can't pull ACR images | No AcrPull role, no MI auth | Added role + `container_registry_use_managed_identity = true` |
 | Azure CLI Graph API failures | CAE `TokenCreatedWithOutdatedPolicies` | Extract OID from ARM JWT, use `--assignee-object-id` |
 | Redis Unhealthy in /api/status | Auth failure on connection | Pending — needs Redis access key or MI auth review |
+| Products page HTTP 500 | APIM subscription key required + missing DNS zones + missing SQL MI user | Fixed: (1) `subscriptionRequired: false` on radshow-product-api, (2) Private DNS zones for internal CAE, (3) Container App MI granted SQL access via migrate.yml |
+| Container App DNS resolution failure | Internal CAE has no private DNS zone | container-apps module auto-creates DNS zone + A records when `internal_load_balancer_enabled = true` |
 
 ---
 
