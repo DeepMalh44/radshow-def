@@ -83,3 +83,48 @@ resource "azurerm_container_app" "this" {
 
   tags = var.tags
 }
+
+#--------------------------------------------------------------
+# Private DNS Zone for Internal Container App Environment
+# When the CAE uses an internal load balancer, APIM (on VNet)
+# needs a private DNS zone to resolve the CAE's custom domain
+# to its static internal IP.
+#--------------------------------------------------------------
+resource "azurerm_private_dns_zone" "cae" {
+  count = var.internal_load_balancer_enabled ? 1 : 0
+
+  name                = azurerm_container_app_environment.this.default_domain
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_private_dns_a_record" "cae_wildcard" {
+  count = var.internal_load_balancer_enabled ? 1 : 0
+
+  name                = "*"
+  zone_name           = azurerm_private_dns_zone.cae[0].name
+  resource_group_name = var.resource_group_name
+  ttl                 = 300
+  records             = [azurerm_container_app_environment.this.static_ip_address]
+}
+
+resource "azurerm_private_dns_a_record" "cae_apex" {
+  count = var.internal_load_balancer_enabled ? 1 : 0
+
+  name                = "@"
+  zone_name           = azurerm_private_dns_zone.cae[0].name
+  resource_group_name = var.resource_group_name
+  ttl                 = 300
+  records             = [azurerm_container_app_environment.this.static_ip_address]
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "cae" {
+  for_each = var.internal_load_balancer_enabled ? toset(var.vnet_ids_for_dns_link) : toset([])
+
+  name                  = "link-${md5(each.value)}"
+  resource_group_name   = var.resource_group_name
+  private_dns_zone_name = azurerm_private_dns_zone.cae[0].name
+  virtual_network_id    = each.value
+  registration_enabled  = false
+  tags                  = var.tags
+}

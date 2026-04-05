@@ -85,3 +85,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "vnet_ids_for_dns_link" {
+  description = "List of VNet resource IDs to link to the CAE private DNS zone (only used when internal_load_balancer_enabled = true)"
+  type        = list(string)
+  default     = []
+}
