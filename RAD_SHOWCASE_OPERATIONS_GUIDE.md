@@ -440,8 +440,16 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | Route | Pattern | Origin Group | Cache | Compression |
 |-------|---------|-------------|-------|-------------|
 | `route-api` | `/api/*` | `og-api` | None | No |
-| `route-spa` | `/*` | `og-spa` | IgnoreQueryString | Yes (`text/html`, `text/css`, `application/javascript`, `application/json`, `image/svg+xml`) |
+| `route-spa` | `/*` | `og-spa` | None (see note) | No |
 | `route-app` | `/app/*` | `og-app` | None | No |
+
+> **Note**: `route-spa` currently has **no cache or compression configured**. It was recreated during AFD Private Link troubleshooting and the cache settings were not reapplied. To restore optimal SPA performance:
+> ```bash
+> az afd route update -g rg-radshow-stg01-cin --profile-name afd-radshow-stg01 --endpoint-name ep-spa \
+>   --route-name route-spa --query-string-caching-behavior IgnoreQueryString \
+>   --enable-compression true --content-types-to-compress "text/html" "text/css" \
+>   "application/javascript" "application/json" "image/svg+xml"
+> ```
 
 ### WAF & Security
 
@@ -460,10 +468,14 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | Setting | Primary (cin) | Secondary (sin) |
 |---------|--------------|------------------|
 | `AZURE_REGION` | `centralindia` | `southindia` |
-| `KEY_VAULT_URI` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
-| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa` | `og-api,og-spa` |
+| `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
+| `KeyVault__PeerVaultUri` | `https://kv-radshow-stg01-sin.vault.azure.net/` | `https://kv-radshow-stg01-cin.vault.azure.net/` |
+| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa,og-app` | `og-api,og-spa,og-app` |
+| `FRONT_DOOR_PROFILE_NAME` | `afd-radshow-stg01` | `afd-radshow-stg01` |
+| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
+| `SqlConnection` | FOG listener (`fog-radshow-stg01.fa2e243b64f2.database.windows.net`) | Same FOG listener |
 | `WEBAPP_HEALTH_URL` | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` | `https://app-radshow-stg01-sin.azurewebsites.net/app/healthz` |
-| `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.{cae}.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.{cae}.southindia.azurecontainerapps.io/healthz` |
+| `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.happysea-a428f96b.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.mangosea-b9cd4f1e.southindia.azurecontainerapps.io/healthz` |
 
 ### App Service Settings
 
@@ -471,7 +483,13 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 |---------|--------------|------------------|
 | `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
 | `ASPNETCORE_PATHBASE` | `/app` | `/app` |
-| `DefaultConnection` | FOG listener endpoint | FOG listener endpoint |
+| `AZURE_REGION` | `centralindia` | `southindia` |
+| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
+| `Redis__ConnectionString` | `redis-radshow-stg01-cin.redis.cache.windows.net:6380,...` | `redis-radshow-stg01-sin.redis.cache.windows.net:6380,...` |
+| `Storage__AccountName` | `stradshowstg01cin` | `stradshowstg01sin` |
+| `DOCKER_REGISTRY_SERVER_URL` | `https://acrradshowstg01cin.azurecr.io` | `https://acrradshowstg01cin.azurecr.io` |
+
+> **Note**: App Service has no direct SQL connection string. It reads data via APIM (`APIM_GATEWAY_URL`) which routes to Container Apps / Function Apps.
 
 > **Critical**: Each region's App Service and Function App must point to their **local** Key Vault. A prior bug had the sin App Service pointing to the cin KV — this caused incorrect region data to be served.
 
@@ -505,8 +523,9 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
 | Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard (`*`) + apex (`@`) A records pointing to CAE static IP. Check VNet links include both primary and secondary VNets. |
 | Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
-| App Service can't reach SQL MI | Verify `DefaultConnection` uses FOG listener endpoint. Check that `migrate.yml` granted SQL access to App Service MI. |
+| App Service can't reach SQL MI | App Service connects via APIM, not directly. Verify `APIM_GATEWAY_URL` is set. Ensure Container Apps private DNS zones resolve. Check `migrate.yml` granted SQL access to App Service MI. |
 | AFD Private Link fails (South India) | Platform limitation — South India doesn't support AFD Shared Private Link. Cannot mix PL + non-PL origins in same origin group. |
+| Route-spa missing cache/compression | Route was recreated without cache settings during PL troubleshooting. Fix: `az afd route update --route-name route-spa --query-string-caching-behavior IgnoreQueryString --enable-compression true ...` |
 | FD returns 404 after route recreation | FD global propagation takes 10-25 minutes. Check `deploymentStatus` — `NotStarted` means still propagating. Wait and retry. |
 | App Service sin returns wrong region | Verify `KeyVault__VaultUri` points to local KV (`kv-radshow-{env}-sin`), not primary KV. Check RBAC on sin KV. |
 | Function App can't pull ACR images | Ensure `AcrPull` role assigned to Function App MI on ACR + `container_registry_use_managed_identity = true`. |

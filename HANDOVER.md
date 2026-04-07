@@ -393,25 +393,58 @@ State is shared across all environments. The storage account is **not managed by
 | Route | Pattern | Origin Group | Cache | Supported Protocols |
 |-------|---------|-------------|-------|-------------------|
 | `route-api` | `/api/*` | `og-api` | None | Http, Https |
-| `route-spa` | `/*` | `og-spa` | IgnoreQueryString, compression enabled (`text/html`, `text/css`, `application/javascript`, `application/json`, `image/svg+xml`) | Http, Https |
+| `route-spa` | `/*` | `og-spa` | None (see note) | Http, Https |
 | `route-app` | `/app/*` | `og-app` | None | Http, Https |
+
+> **Note**: `route-spa` currently has **no cache or compression configured**. It was recreated during AFD Private Link troubleshooting and the cache settings were not reapplied. To restore optimal SPA performance, re-enable caching:
+> ```bash
+> az afd route update -g rg-radshow-stg01-cin --profile-name afd-radshow-stg01 --endpoint-name ep-spa \
+>   --route-name route-spa --query-string-caching-behavior IgnoreQueryString \
+>   --enable-compression true --content-types-to-compress "text/html" "text/css" \
+>   "application/javascript" "application/json" "image/svg+xml"
+> ```
 
 ### Security
 
-- **WAF Policy**: Prevention mode, managed rule sets with custom rate-limiting
-- **Front Door ID**: Used for `X-Azure-FDID` header validation on App Services (recommended)
+- **WAF Policy**: Prevention mode, managed rule sets (Default Rule Set + Bot Protection) with custom rate-limiting rules
+- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — used for `X-Azure-FDID` header validation on App Services (recommended)
+- **Profile Timeout**: 240 seconds
 
 ## Function App Environment Variables
 
-Key app settings configured on Function Apps (set via Terragrunt/Terraform):
+Key app settings configured on Function Apps (set via Terragrunt/Terraform). The Function App acts as the DR orchestrator, so it has settings for both regions, resource group names, and connection details.
+
+### Core Settings
 
 | Setting | Primary Value (cin) | Secondary Value (sin) |
 |---------|--------------------|-----------------------|
 | `AZURE_REGION` | `centralindia` | `southindia` |
-| `KEY_VAULT_URI` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
-| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa` | `og-api,og-spa` |
+| `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
+| `KeyVault__PeerVaultUri` | `https://kv-radshow-stg01-sin.vault.azure.net/` | `https://kv-radshow-stg01-cin.vault.azure.net/` |
+| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
+| `SqlConnection` | `Server=fog-radshow-stg01.fa2e243b64f2.database.windows.net;Database=radshow;Authentication=Active Directory Managed Identity;...` | Same FOG listener |
+| `Redis__ConnectionString` | `redis-radshow-stg01-cin.redis.cache.windows.net:6380,...` | `redis-radshow-stg01-sin.redis.cache.windows.net:6380,...` |
+| `Storage__AccountName` | `stradshowstg01cin` | `stradshowstg01sin` |
+
+### DR Orchestration Settings
+
+| Setting | Primary Value (cin) | Secondary Value (sin) |
+|---------|--------------------|-----------------------|
+| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa,og-app` | `og-api,og-spa,og-app` |
+| `FRONT_DOOR_PROFILE_NAME` | `afd-radshow-stg01` | `afd-radshow-stg01` |
+| `PRIMARY_LOCATION` | `centralindia` | `centralindia` |
+| `SECONDARY_LOCATION` | `southindia` | `southindia` |
+| `RESOURCE_GROUP_PRIMARY` | `rg-radshow-stg01-cin` | `rg-radshow-stg01-cin` |
+| `RESOURCE_GROUP_SECONDARY` | `rg-radshow-stg01-sin` | `rg-radshow-stg01-sin` |
+| `SUBSCRIPTION_ID` | `b8383a80-7a39-472f-89b8-4f0b6a53b266` | `b8383a80-7a39-472f-89b8-4f0b6a53b266` |
+| `SQL_MI_FOG_NAME` | `fog-radshow-stg01` | `fog-radshow-stg01` |
+
+### Health Check URLs
+
+| Setting | Primary Value (cin) | Secondary Value (sin) |
+|---------|--------------------|-----------------------|
 | `WEBAPP_HEALTH_URL` | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` | `https://app-radshow-stg01-sin.azurewebsites.net/app/healthz` |
-| `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.{cae}.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.{cae}.southindia.azurecontainerapps.io/healthz` |
+| `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.happysea-a428f96b.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.mangosea-b9cd4f1e.southindia.azurecontainerapps.io/healthz` |
 
 ## App Service Environment Variables
 
@@ -419,9 +452,42 @@ Key app settings configured on Function Apps (set via Terragrunt/Terraform):
 |---------|--------------------|-----------------------|
 | `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
 | `ASPNETCORE_PATHBASE` | `/app` | `/app` |
-| `DefaultConnection` | FOG listener endpoint | FOG listener endpoint |
+| `AZURE_REGION` | `centralindia` | `southindia` |
+| `ASPNETCORE_ENVIRONMENT` | `Staging` | `Staging` |
+| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
+| `Redis__ConnectionString` | `redis-radshow-stg01-cin.redis.cache.windows.net:6380,...` | `redis-radshow-stg01-sin.redis.cache.windows.net:6380,...` |
+| `Storage__AccountName` | `stradshowstg01cin` | `stradshowstg01sin` |
+| `Storage__BlobEndpoint` | `https://stradshowstg01cin.blob.core.windows.net/` | `https://stradshowstg01sin.blob.core.windows.net/` |
+| `DOCKER_REGISTRY_SERVER_URL` | `https://acrradshowstg01cin.azurecr.io` | `https://acrradshowstg01cin.azurecr.io` |
+| `WEBSITE_HEALTHCHECK_MAXPINGFAILURES` | `2` | `2` |
+
+> **Note**: The App Service does **not** have a direct SQL connection string as an app setting. It reads data via APIM (`APIM_GATEWAY_URL`) which routes to Container Apps / Function Apps for database operations. Key Vault secrets are read directly via Managed Identity using `KeyVault__VaultUri`.
 
 > **Important**: Each region's App Service and Function App must point to their **local** Key Vault. A prior bug had the sin App Service pointing to the cin KV — this caused incorrect region data to be served.
+
+## Managed Identity Reference (STG01)
+
+System-assigned managed identity principal IDs for all compute resources:
+
+| Resource | Region | Principal ID |
+|----------|--------|--------------|
+| `func-radshow-stg01-cin` | centralindia | `bc01ae81-49a1-4a90-8ef4-12f01a653522` |
+| `func-radshow-stg01-sin` | southindia | `d5b130b7-32b5-48dc-9e9d-441cf502f780` |
+| `app-radshow-stg01-cin` | centralindia | `3835adfa-d2cf-4da8-85f4-096f1c2ed7ff` |
+| `app-radshow-stg01-sin` | southindia | `78497ff2-c6de-4ab4-bc13-5600f7e83451` |
+| `ca-products-radshow-stg01-cin` | centralindia | `46ce9dca-09e5-4b35-9cd1-db5f9084d0af` |
+| `ca-products-radshow-stg01-sin` | southindia | `fa3c960e-64ba-4613-88b4-357414ab8b1b` |
+
+CI/CD Service Principal (OIDC): OID `6952ac03-12b8-4bd2-8697-9b624583b14f`
+
+> **Note**: These IDs change if a resource is recreated (e.g., `terragrunt apply` forces recreate on Container Apps). After recreation, re-run `radshow-db` migration pipeline to re-grant SQL MI access to new identities.
+
+## Container App Environment Details (STG01)
+
+| Region | CAE Name | Default Domain | Static IP | DNS Zone |
+|--------|----------|---------------|-----------|----------|
+| centralindia | (internal) | `happysea-a428f96b.centralindia.azurecontainerapps.io` | `10.1.4.240` | Private DNS zone with `*` + `@` A records, linked to both VNets |
+| southindia | (internal) | `mangosea-b9cd4f1e.southindia.azurecontainerapps.io` | (check via `az containerapp env show`) | Private DNS zone with `*` + `@` A records, linked to both VNets |
 
 ## Troubleshooting
 
@@ -434,10 +500,12 @@ Key app settings configured on Function Apps (set via Terragrunt/Terraform):
 | Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
 | Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard (`*`) + apex (`@`) A records pointing to CAE static IP. Check VNet links include all relevant VNets (both primary and secondary). |
 | Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
-| App Service can't reach SQL MI | Verify `DefaultConnection` uses FOG listener endpoint, not direct SQL MI FQDN. Check that `migrate.yml` granted SQL access to App Service managed identity. |
+| App Service can't reach SQL MI | App Service connects to SQL MI via APIM, not directly. Verify `APIM_GATEWAY_URL` is set. If Container Apps are the backend, ensure private DNS zones resolve. Check that `migrate.yml` granted SQL access to App Service managed identity. |
 | AFD Private Link fails for South India | Azure platform limitation — South India does not support AFD Shared Private Link for any resource type. Cannot mix PL + non-PL origins in the same origin group. |
 | FD returns 404 after route recreation | FD global propagation takes 10-25 minutes. Check `deploymentStatus` — `NotStarted` means still propagating. Wait and retry. |
 | App Service sin returns wrong region data | Verify `KeyVault__VaultUri` points to local KV (`kv-radshow-{env}-sin`), not primary KV. Check RBAC on sin KV. |
+| Route-spa missing cache/compression | Route was recreated without cache settings during PL troubleshooting. Fix: `az afd route update --route-name route-spa --query-string-caching-behavior IgnoreQueryString --enable-compression true ...` |
+| Function App can't pull ACR images | Ensure `AcrPull` role assigned to Function App MI on ACR + `container_registry_use_managed_identity = true`. |
 
 ## Terraform Modules (`radshow-def/modules/`)
 
