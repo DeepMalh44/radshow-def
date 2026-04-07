@@ -232,7 +232,19 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 | **Redis** | Geo-replicated — both regions always active |
 | **Storage** | Both regions have SPA files — FD routes traffic |
 
-### DR Scripts (`radshow-def/modules/automation/scripts/`)
+### DR Execution Resilience Tiers
+
+DR can be triggered through three independent mechanisms, each with different region dependencies:
+
+| Tier | Mechanism | Region Dependency |
+|------|-----------|-------------------|
+| **1** | SPA UI → `/api/failover` endpoint | Hits secondary via Front Door if primary down |
+| **2** | Azure Automation webhook (dual-region AA) | Both regions have AA — alert fires to whichever is up |
+| **3** | Operator runs standalone `runbooks/` scripts | **None** — runs from any workstation with Azure ARM access |
+
+### Automation Module Scripts (`radshow-def/modules/automation/scripts/`)
+
+Headless runbooks deployed to Azure Automation Account via `file()` in Terraform — any script change is deployed on `terragrunt apply`.
 
 | Script | Purpose |
 |---|---|
@@ -244,6 +256,30 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 | `05-Validate-Failover.ps1` | Verify everything switched correctly |
 | `06-Capture-Evidence.ps1` | Export drill evidence as JSON (compliance) |
 | `Invoke-DRFailover.ps1` | Azure Automation Runbook — can be triggered by alert |
+
+### Standalone Operator Runbooks (`radshow-def/runbooks/`)
+
+Interactive PowerShell scripts for operator-driven DR drills. These include colored output, confirmation prompts, and E2E CRUD tests. They have **no Azure region dependency** — they work from any internet-connected workstation with Azure ARM access.
+
+| Script | Purpose |
+|---|---|
+| `00-setup-environment.ps1` | Interactive auth + config (`az login` or service principal) |
+| `01-check-health.ps1` | Pre-drill health check with go/no-go gate |
+| `02-planned-failover.ps1` | Graceful failover with operator confirmations at each step |
+| `03-unplanned-failover.ps1` | Forced failover with double-confirm danger gate (AllowDataLoss) |
+| `04-planned-failback.ps1` | Return to primary region with confirmations |
+| `05-validate-failover.ps1` | Post-operation validation + E2E CRUD test via Front Door |
+| `06-capture-evidence.ps1` | Export JSON evidence + Markdown report to local disk |
+| `07-e2e-dr-drill.ps1` | Full E2E orchestrator: Setup→Health→Failover→Soak→Failback→Report |
+
+Quick start:
+```powershell
+# Full E2E drill (automated)
+.\07-e2e-dr-drill.ps1 -Environment "stg01" -SoakMinutes 5 -NoPrompt
+
+# Dry run
+.\07-e2e-dr-drill.ps1 -Environment "stg01" -DryRun
+```
 
 ### Running a Planned Failover Test
 
@@ -275,13 +311,21 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 . ./05-Validate-Failover.ps1 -OperationType "failback"
 ```
 
+### DR Failover Steps (what the runbooks do)
+
+1. **SQL MI FOG failover** — `az sql instance-failover-group set-primary --location {secondary}`
+2. **Front Door origin priority swap** — all 3 origin groups (`og-api`, `og-spa`, `og-app`): secondary→P1, primary→P2
+3. **Key Vault active-region update** — set `active-region` secret to secondary region in both KVs
+4. **Validation** — health probes, CRUD test via Front Door, region verification
+
 ### What to Expect During Failover
 
-1. **Downtime window:** ~2-5 minutes for planned failover (SQL MI FOG sync time)
+1. **Downtime window:** ~2-5 minutes for planned failover (SQL MI FOG sync time, 60-minute grace period)
 2. **SPA:** Continues working — Front Door serves from secondary storage
 3. **API calls:** Brief interruption while SQL MI switches. After switch, APIM/Front Door route to secondary Function App
-4. **Data:** Zero data loss for planned failover. Potential data loss for unplanned (forced) failover
-5. **Clients:** No URL changes — Front Door endpoint stays the same
+4. **App Service:** Front Door routes to secondary App Service after priority swap
+5. **Data:** Zero data loss for planned failover. Potential data loss for unplanned (forced) failover
+6. **Clients:** No URL changes — Front Door endpoint stays the same
 
 ### SPA Failover Control Panel (In-App UI)
 
@@ -348,12 +392,124 @@ The SPA only performs **planned (graceful) failover**. It does NOT support `Allo
 | API (via APIM direct) | `https://apim-radshow-stg01-cin.azure-api.net/api/products` |
 | Products API (via APIM) | `https://apim-radshow-stg01-cin.azure-api.net/products` |
 | API (Function App direct) | `https://func-radshow-stg01-cin.azurewebsites.net/api/products` |
+| App Service direct | `https://app-radshow-stg01-cin.azurewebsites.net/app/Products` |
+| Health check (API) | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/healthz` |
+| Health check (App Service) | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` |
+| Failover Control | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/failover` |
+| Regional Status | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/status` |
 
 Quick test:
 ```bash
-curl https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/products
-# Should return JSON array of 10 products
+# All 3 Front Door routes
+curl -s -o /dev/null -w "SPA: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/
+curl -s -o /dev/null -w "API: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/status
+curl -s -o /dev/null -w "APP: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products
+
+# Direct backend health checks
+curl -s https://func-radshow-stg01-cin.azurewebsites.net/api/healthz
+curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 ```
+
+---
+
+## Front Door Configuration Details
+
+### Origin Groups & Health Probes
+
+| Origin Group | Health Probe Path | Method | Protocol | Interval | Sample Size | Required Successful | Traffic Restoration |
+|-------------|-------------------|--------|----------|----------|-------------|--------------------|--------------------|---|
+| `og-api` | `/api/healthz` | GET | HTTPS | 30s | 4 | 2 | 10 min |
+| `og-spa` | `/index.html` | GET | HTTPS | 30s | 4 | 2 | 10 min |
+| `og-app` | `/app/healthz` | GET | HTTPS | 30s | 4 | 3 | 10 min |
+
+### Origins (STG01)
+
+| Origin Group | Origin | Hostname | Priority |
+|-------------|--------|----------|----------|
+| `og-api` | `apim-primary` | `apim-radshow-stg01-cin.azure-api.net` (global) | 1 |
+| `og-api` | `apim-secondary` | `apim-radshow-stg01-cin-southindia-01.regional.azure-api.net` | 2 |
+| `og-spa` | `spa-primary` | `stradshowstg01cin.z29.web.core.windows.net` | 1 |
+| `og-spa` | `spa-secondary` | `stradshowstg01sin.z30.web.core.windows.net` | 2 |
+| `og-app` | `app-primary` | `app-radshow-stg01-cin.azurewebsites.net` | 1 |
+| `og-app` | `app-secondary` | `app-radshow-stg01-sin.azurewebsites.net` | 2 |
+
+> **Note**: All origins connect over public internet (no Private Link). South India does not support AFD Shared Private Link, and Azure forbids mixing PL + non-PL origins in the same origin group.
+
+### Routes
+
+| Route | Pattern | Origin Group | Cache | Compression |
+|-------|---------|-------------|-------|-------------|
+| `route-api` | `/api/*` | `og-api` | None | No |
+| `route-spa` | `/*` | `og-spa` | IgnoreQueryString | Yes (`text/html`, `text/css`, `application/javascript`, `application/json`, `image/svg+xml`) |
+| `route-app` | `/app/*` | `og-app` | None | No |
+
+### WAF & Security
+
+- **WAF Policy**: Prevention mode, attached to all endpoints
+- **Managed Rule Sets**: Default Rule Set + Bot Protection
+- **Custom Rules**: Rate-limiting rules
+- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — used for `X-Azure-FDID` header validation on App Services
+- **Profile Timeout**: 240 seconds
+
+---
+
+## Environment Variables Reference
+
+### Function App Settings
+
+| Setting | Primary (cin) | Secondary (sin) |
+|---------|--------------|------------------|
+| `AZURE_REGION` | `centralindia` | `southindia` |
+| `KEY_VAULT_URI` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
+| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa` | `og-api,og-spa` |
+| `WEBAPP_HEALTH_URL` | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` | `https://app-radshow-stg01-sin.azurewebsites.net/app/healthz` |
+| `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.{cae}.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.{cae}.southindia.azurecontainerapps.io/healthz` |
+
+### App Service Settings
+
+| Setting | Primary (cin) | Secondary (sin) |
+|---------|--------------|------------------|
+| `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
+| `ASPNETCORE_PATHBASE` | `/app` | `/app` |
+| `DefaultConnection` | FOG listener endpoint | FOG listener endpoint |
+
+> **Critical**: Each region's App Service and Function App must point to their **local** Key Vault. A prior bug had the sin App Service pointing to the cin KV — this caused incorrect region data to be served.
+
+---
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|----------|
+| **Docker containers on Function Apps** | CI/CD deploys container images via `az functionapp config container set`, not zip deploy. Terraform ignores `application_stack` drift via `lifecycle.ignore_changes`. |
+| **FOG listener for all compute** | Function App, App Service, and Container Apps all use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
+| **Single Front Door endpoint** | SPA + API + App share one endpoint (`ep-spa`) so relative `/api/*` calls work without CORS. |
+| **Active-passive FD routing** | Origins use `priority` (1=primary, 2=secondary). Failover swaps priorities. Health probes use GET requests to detect origin availability. |
+| **AFD Private Link not viable** | South India does not support AFD Private Link; Azure forbids mixing PL + non-PL origins in the same origin group. Use App Service access restrictions (`AzureFrontDoor.Backend` service tag + `X-Azure-FDID` header) as alternative. |
+| **Storage public access required** | Storage static website endpoints (`$web`) require `publicNetworkAccess=Enabled` for Front Door. `allowSharedKeyAccess=false` (MI-only auth for management). |
+| **Each region has its own KV** | App Service and Function App in each region point to their local Key Vault. Both KVs have `active-region` secret set to the same value. |
+| **3-tier DR resilience** | SPA UI (Tier 1), Azure Automation webhooks (Tier 2), and operator scripts (Tier 3) provide independent failover paths with no single point of failure. |
+| **OIDC (no secrets)** | GitHub Actions authenticate via Workload Identity Federation — no client secrets to rotate. |
+| **APIOps for APIM** | APIM policies/APIs managed as code in `radshow-apim`, published via pipeline (not Terraform). |
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| `terragrunt apply` resets Function App to `DOTNET-ISOLATED\|8.0` | Fixed — `lifecycle.ignore_changes` on `application_stack`. Re-run CI/CD pipeline to restore container. |
+| State lock stuck | `terragrunt force-unlock {lock-id}` |
+| KV access denied (403) | KVs are locked down. Temporarily enable public access, perform operation, then re-lock. |
+| SPA shows stale content | Purge Front Door cache: `az afd endpoint purge ... --content-paths "/*"` |
+| Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
+| Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard (`*`) + apex (`@`) A records pointing to CAE static IP. Check VNet links include both primary and secondary VNets. |
+| Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
+| App Service can't reach SQL MI | Verify `DefaultConnection` uses FOG listener endpoint. Check that `migrate.yml` granted SQL access to App Service MI. |
+| AFD Private Link fails (South India) | Platform limitation — South India doesn't support AFD Shared Private Link. Cannot mix PL + non-PL origins in same origin group. |
+| FD returns 404 after route recreation | FD global propagation takes 10-25 minutes. Check `deploymentStatus` — `NotStarted` means still propagating. Wait and retry. |
+| App Service sin returns wrong region | Verify `KeyVault__VaultUri` points to local KV (`kv-radshow-{env}-sin`), not primary KV. Check RBAC on sin KV. |
+| Function App can't pull ACR images | Ensure `AcrPull` role assigned to Function App MI on ACR + `container_registry_use_managed_identity = true`. |
 
 ---
 
