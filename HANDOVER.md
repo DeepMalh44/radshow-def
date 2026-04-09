@@ -279,6 +279,165 @@ curl -s https://func-radshow-{env}-{primary}.azurewebsites.net/api/healthz
 
 ---
 
+## GitHub CI/CD Configuration Reference
+
+> **This section is the complete reference for everything a customer must configure after cloning all 6 repos.** Cloning only copies code — secrets, environments, service principals, and federated credentials must be created separately.
+
+### GitHub Environments (required on all 5 app repos)
+
+Create these environments via **Settings → Environments** on `radshow-lic`, `radshow-api`, `radshow-spa`, `radshow-apim`, and `radshow-db`. (`radshow-def` does not need environments — its `validate.yml` runs without Azure auth.)
+
+| Environment | Protection Rules |
+|-------------|-----------------|
+| `DEV01` | None |
+| `STG01` | Optional: manual approval gate |
+| `PRD01` | **Recommended**: required reviewers + branch protection |
+
+### Service Principal & OIDC Federated Credentials
+
+Create **one Entra App Registration per environment** (e.g., `sp-radshow-cicd-dev01`, `sp-radshow-cicd-stg01`, `sp-radshow-cicd-prd01`).
+
+#### RBAC Roles Required on Each SP
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| `Contributor` | Primary + Secondary resource groups | Deploy all resources |
+| `Storage Blob Data Contributor` | Primary + Secondary resource groups | Upload SPA to `$web`, manage blobs |
+| `Storage Blob Data Contributor` | Terraform state storage account (`stradshwtfstate`) | Read/write TF state |
+| `User Access Administrator` | Subscription | Needed by Terragrunt `role-assignments` module to assign RBAC |
+
+#### Federated Credentials (15 total = 5 repos × 3 environments)
+
+Each repo+environment combination needs a federated credential on the corresponding app registration:
+
+| Credential Name Pattern | Subject Format |
+|------------------------|----------------|
+| `gh-radshow-{repo}-{env}` | `repo:{YOUR_ORG}/radshow-{repo}:environment:{ENV}` |
+
+Example for STG01:
+
+| Name | Subject | App Registration |
+|------|---------|-----------------|
+| `gh-radshow-lic-stg01` | `repo:{ORG}/radshow-lic:environment:STG01` | `sp-radshow-cicd-stg01` |
+| `gh-radshow-api-stg01` | `repo:{ORG}/radshow-api:environment:STG01` | `sp-radshow-cicd-stg01` |
+| `gh-radshow-spa-stg01` | `repo:{ORG}/radshow-spa:environment:STG01` | `sp-radshow-cicd-stg01` |
+| `gh-radshow-apim-stg01` | `repo:{ORG}/radshow-apim:environment:STG01` | `sp-radshow-cicd-stg01` |
+| `gh-radshow-db-stg01` | `repo:{ORG}/radshow-db:environment:STG01` | `sp-radshow-cicd-stg01` |
+
+OIDC parameters (used in all `azure/login@v2` steps):
+- **Issuer**: `https://token.actions.githubusercontent.com`
+- **Audience**: `api://AzureADTokenExchange`
+
+> When forking to a new org, the org name in the subject **must match your GitHub org**. The OIDC script handles this via `--org`.
+
+### Complete GitHub Secrets Matrix (per environment)
+
+#### Secrets set AUTOMATICALLY by `setup-github-oidc.sh`
+
+| Secret | radshow-lic | radshow-api | radshow-spa | radshow-apim | radshow-db |
+|--------|:-----------:|:-----------:|:-----------:|:------------:|:----------:|
+| `AZURE_CLIENT_ID` | Yes | Yes | Yes | Yes | Yes |
+| `AZURE_TENANT_ID` | Yes | Yes | Yes | Yes | Yes |
+| `AZURE_SUBSCRIPTION_ID` | Yes | Yes | Yes | Yes | Yes |
+| `RESOURCE_GROUP` | Yes | Yes | Yes | — | — |
+| `ACR_NAME` | — | Yes | — | — | — |
+| `FUNC_APP_NAME` | — | Yes | — | — | Yes |
+| `FUNC_APP_SECONDARY_NAME` | — | Yes | — | — | Yes |
+| `RESOURCE_GROUP_SECONDARY` | — | Yes | — | — | — |
+| `STORAGE_ACCOUNT_NAME` | — | — | Yes | — | — |
+| `STORAGE_ACCOUNT_SECONDARY_NAME` | — | — | Yes | — | — |
+| `FRONT_DOOR_RESOURCE_GROUP` | — | — | Yes | — | — |
+| `FRONT_DOOR_PROFILE_NAME` | — | — | Yes | — | — |
+| `FRONT_DOOR_ENDPOINT_NAME` | — | — | Yes | — | — |
+| `APP_SERVICE_NAME` | — | — | — | — | Yes |
+| `APP_SERVICE_SECONDARY_NAME` | — | — | — | — | Yes |
+| `APIM_NAME` | — | — | — | Yes | — |
+
+#### Secrets that MUST be set MANUALLY (per environment)
+
+These secrets are **not** created by the OIDC script. Set them in **GitHub → Settings → Environments → {ENV} → Environment secrets**.
+
+| Repo | Secret | Example Value (STG01) | When to Set |
+|------|--------|----------------------|-------------|
+| **radshow-api** | `CONTAINER_APP_NAME` | `ca-products-radshow-stg01-cin` | After `terragrunt apply` of `container-apps` |
+| **radshow-api** | `CONTAINER_APP_SECONDARY_NAME` | `ca-products-radshow-stg01-sin` | After `terragrunt apply` of `container-apps-secondary` |
+| **radshow-apim** | `AZURE_RESOURCE_GROUP_NAME` | `rg-radshow-stg01-cin` | Before first APIM pipeline run |
+| **radshow-apim** | `API_MANAGEMENT_SERVICE_NAME` | `apim-radshow-stg01-cin` | Before first APIM pipeline run |
+| **radshow-db** | `SQL_MI_FQDN` | `fog-radshow-stg01.fa2e...database.windows.net` | After `terragrunt apply` of `sql-mi-fog` |
+| **radshow-db** | `SQL_DATABASE_NAME` | `radshow` | After `terragrunt apply` of `sql-mi` |
+| **radshow-db** | `CONTAINER_APP_NAME` | `ca-products-radshow-stg01-cin` | After `terragrunt apply` of `container-apps` |
+| **radshow-db** | `CONTAINER_APP_SECONDARY_NAME` | `ca-products-radshow-stg01-sin` | After `terragrunt apply` of `container-apps-secondary` |
+
+> **Note**: The OIDC script sets `APIM_NAME` on radshow-apim, but the APIOps workflow uses `API_MANAGEMENT_SERVICE_NAME`. Both must be set.
+
+### Files to Update After Forking/Cloning
+
+| Repo | File | What to Change |
+|------|------|---------------|
+| radshow-lic | `{ENV}/env.hcl` | `subscription_id`, `tenant_id`, `cicd_sp_object_id`, region names/shorts |
+| radshow-lic | Root `terragrunt.hcl` | State storage account name (if `stradshwtfstate` is taken) |
+| radshow-lic | `_envcommon/*.hcl` | Module source URLs — change `DeepMalh44` to your GitHub org |
+| radshow-lic | `scripts/setup-github-oidc.sh` | `GITHUB_ORG` default |
+| radshow-lic | `STG01/sql-mi/terragrunt.hcl` | `entra_admin_object_id` → your Entra security group OID |
+| radshow-apim | `configuration.{env}.yaml` | `tenant-id` named value, backend URLs |
+
+### Complete Deployment Order
+
+```text
+Phase 1 — Bootstrap (one-time)
+  1. Create TF state backend: rg-radshow-tfstate + stradshwtfstate + tfstate container
+  2. Create Entra App Registrations + Service Principals (1 per env)
+  3. Run setup-github-oidc.sh for each environment (creates fed creds + GitHub secrets)
+  4. Create GitHub environments (DEV01, STG01, PRD01) on all 5 app repos
+  5. Set MANUAL secrets: AZURE_RESOURCE_GROUP_NAME, API_MANAGEMENT_SERVICE_NAME (radshow-apim)
+
+Phase 2 — Infrastructure (radshow-lic, expect 2-6 hrs for SQL MI)
+  6. terragrunt apply --all in radshow-lic/{ENV}
+     (SQL MI provisions first, takes 4-6 hours — rest deploys in parallel)
+
+Phase 3 — Post-Infra Secrets
+  7. Set SQL_MI_FQDN + SQL_DATABASE_NAME on radshow-db (from terragrunt output)
+  8. Set CONTAINER_APP_NAME + CONTAINER_APP_SECONDARY_NAME on radshow-api and radshow-db
+
+Phase 4 — Application Deployment (push to main or workflow_dispatch)
+  9.  radshow-db   → migrate.yml  (schema + SQL user grants for all managed identities)
+  10. radshow-api  → deploy.yml   (Docker build → ACR → func apps + container apps)
+  11. radshow-apim → publisher.yml (API definitions + policies to APIM)
+  12. radshow-spa  → deploy.yml   (Vue build → both storage $web → purge FD cache)
+
+Phase 5 — Post-Deploy Manual Steps
+  13. Seed Key Vault secrets: active-region + failover-password (both KVs)
+  14. Verify Container App private DNS zones (wildcard + apex A records, VNet links)
+  15. Verify NSG rules: port 80 from AzureFrontDoor.Backend on AppGW subnets
+  16. Verify FRONT_DOOR_ORIGIN_GROUP_NAME=og-appgw on both func apps
+  17. Run verification: curl all FD routes (/, /api/status, /api/products, /api/healthz)
+```
+
+### Pipeline Flow Per Repo
+
+| Repo | Workflow | Trigger | Flow |
+|------|----------|---------|------|
+| radshow-def | `validate.yml` | PR to main | `terraform fmt` + `terraform validate` (no Azure auth) |
+| radshow-lic | `plan.yml` / `apply.yml` | PR / `workflow_dispatch` | Plan (matrix per changed env) → Apply (single env) |
+| radshow-api | `deploy.yml` | Push to main | `build` → `deploy-dev` (DEV01) → `deploy-stg` (STG01) → `deploy-prd` (PRD01) |
+| radshow-spa | `deploy.yml` | Push to main | `build` → `deploy-dev` (DEV01) → `deploy-stg` (STG01) → `deploy-prd` (PRD01) |
+| radshow-db | `migrate.yml` | Push to main | `validate` → `deploy-dev` (DEV01) → `deploy-stg` (STG01) → `deploy-prd` (PRD01) |
+| radshow-apim | `publisher.yml` | Push to main | `publish-dev` (DEV01) → `publish-stg` (STG01) → `publish-prd` (PRD01) |
+
+### Azure Resources That Must Exist BEFORE Deployment
+
+| Resource | Name | Purpose |
+|----------|------|---------|
+| Resource Group | `rg-radshow-tfstate` | Holds TF state storage |
+| Storage Account | `stradshwtfstate` (globally unique — change if taken) | Stores all Terraform state files |
+| Blob Container | `tfstate` | Container within state storage |
+| Entra App Registration | `sp-radshow-cicd-{env}` (one per env) | OIDC identity for GitHub Actions |
+| Service Principal | Auto-created from app reg | For RBAC assignments |
+| Federated Credentials | 5 per env (15 total) | OIDC trust for GitHub Actions |
+| RBAC Assignments | Contributor + Storage Blob Data Contributor + User Access Admin | SP access to Azure |
+
+---
+
 ## Key Design Decisions
 
 | Decision | Rationale |
