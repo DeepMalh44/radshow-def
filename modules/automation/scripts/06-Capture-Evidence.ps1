@@ -179,22 +179,23 @@ catch {
 
 Write-Output ""
 
-# ── 5. App Services (Web App) ──────────────────────────────────────────────
-Write-Output "[CAPTURE] App Service Status"
+# ── 5. Application Gateway (dual-region) ──────────────────────────────────
+Write-Output "[CAPTURE] Application Gateway Status"
 foreach ($pair in @(
-    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
-    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+    @{ Name = $Config.AppGwPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppGwSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
 )) {
     try {
-        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
-        $evidence.Components["AppService_$($pair.Label)"] = @{
-            Name  = $pair.Name
-            State = $app.State
+        $appgw = Get-AzApplicationGateway -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["AppGW_$($pair.Label)"] = @{
+            Name              = $pair.Name
+            ProvisioningState = $appgw.ProvisioningState
+            OperationalState  = $appgw.OperationalState
         }
-        Write-Output "  $($pair.Label): $($pair.Name) State=$($app.State)"
+        Write-Output "  $($pair.Label): $($pair.Name) Provisioning=$($appgw.ProvisioningState) Operational=$($appgw.OperationalState)"
     }
     catch {
-        $evidence.Components["AppService_$($pair.Label)"] = @{ Name = $pair.Name; State = "Unreachable" }
+        $evidence.Components["AppGW_$($pair.Label)"] = @{ Name = $pair.Name; State = "Unreachable" }
         Write-Output "  $($pair.Label): Not reachable"
     }
 }

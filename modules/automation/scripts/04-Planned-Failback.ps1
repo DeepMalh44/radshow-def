@@ -151,8 +151,7 @@ try {
 
             foreach ($origin in $origins) {
                 # Primary = priority 1, Secondary = priority 2
-                $isPrimary = $origin.HostName -match $Config.PrimaryRegionShort -or
-                             $origin.HostName -match "scus"
+                $isPrimary = $origin.Name -match 'primary'
                 $newPriority = if ($isPrimary) { 1 } else { 2 }
 
                 Write-Output "  Origin: $($origin.Name) -> Priority $newPriority"

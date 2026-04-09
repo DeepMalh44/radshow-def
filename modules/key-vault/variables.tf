@@ -124,3 +124,15 @@ variable "secrets" {
   default     = {}
   sensitive   = true
 }
+
+variable "generate_appgw_cert" {
+  description = "Generate a self-signed certificate for Application Gateway TLS listener"
+  type        = bool
+  default     = false
+}
+
+variable "name_prefix" {
+  description = "Environment name prefix for the self-signed cert CN (e.g. radshow-stg01-cin)"
+  type        = string
+  default     = ""
+}

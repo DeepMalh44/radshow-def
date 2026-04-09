@@ -239,6 +239,50 @@ foreach ($pair in @(
     }
 }
 
+# ── 8. Application Gateway (dual-region) ────────────────────────────────
+Write-Host "[CHECK] Application Gateways (dual-region)" -ForegroundColor Yellow
+foreach ($pair in @(
+    @{ Name = $Config.AppGwPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppGwSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $appgw = Get-AzApplicationGateway -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $healthy = $appgw.ProvisioningState -eq "Succeeded" -and $appgw.OperationalState -eq "Running"
+        $results += @{
+            Component = "AppGW ($($pair.Label))"
+            Status    = if ($healthy) { "Healthy" } else { "Warning" }
+            Detail    = "Provisioning=$($appgw.ProvisioningState), Operational=$($appgw.OperationalState)"
+            Critical  = $false
+        }
+        $color = if ($healthy) { "Green" } else { "Yellow" }
+        Write-Host "  $($pair.Label): $($pair.Name) Provisioning=$($appgw.ProvisioningState) Operational=$($appgw.OperationalState)" -ForegroundColor $color
+
+        # Check backend health
+        try {
+            $backendHealth = Get-AzApplicationGatewayBackendHealth -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+            foreach ($pool in $backendHealth.BackendAddressPools) {
+                foreach ($server in $pool.BackendHttpSettingsCollection) {
+                    $poolName = $server.BackendHttpSettings.Id.Split('/')[-1]
+                    foreach ($srv in $server.Servers) {
+                        $srvHealthy = $srv.Health -eq "Healthy"
+                        $color = if ($srvHealthy) { "Green" } else { "Yellow" }
+                        Write-Host "    Backend $poolName | $($srv.Address): $($srv.Health)" -ForegroundColor $color
+                    }
+                }
+            }
+        }
+        catch {
+            Write-Host "    Backend health check failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        $results += @{ Component = "AppGW ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message; Critical = $false }
+        Write-Host "  $($pair.Label): [ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+
 # ── Summary ─────────────────────────────────────────────────────────────
 $healthy = ($results | Where-Object { $_.Status -eq "Healthy" }).Count
 $warnings = ($results | Where-Object { $_.Status -eq "Warning" }).Count

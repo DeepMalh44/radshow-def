@@ -156,8 +156,8 @@ try {
             -OriginGroupName $og.Name
 
         foreach ($origin in $origins) {
-            $isTarget = $origin.HostName -match $(
-                if ($Action -eq "failover") { $config.SecondaryRegionShort } else { $config.PrimaryRegionShort }
+            $isTarget = $origin.Name -match $(
+                if ($Action -eq "failover") { 'secondary' } else { 'primary' }
             )
             $newPriority = if ($isTarget) { 1 } else { 2 }
 

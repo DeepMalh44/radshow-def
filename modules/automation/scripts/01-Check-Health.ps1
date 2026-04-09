@@ -149,24 +149,24 @@ foreach ($name in @($Config.FuncAppPrimaryName, $Config.FuncAppSecondaryName)) {
 
 Write-Output ""
 
-# ── 6. App Services (Web App) ──────────────────────────────────────────────
-Write-Output "[CHECK] App Services (Web App)"
+# ── 6. Application Gateway (dual-region) ──────────────────────────────────
+Write-Output "[CHECK] Application Gateways"
 foreach ($pair in @(
-    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
-    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+    @{ Name = $Config.AppGwPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppGwSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
 )) {
     try {
-        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
-        $running = $app.State -eq "Running"
+        $appgw = Get-AzApplicationGateway -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $healthy = $appgw.ProvisioningState -eq "Succeeded" -and $appgw.OperationalState -eq "Running"
         $results += @{
-            Component = "AppService ($($pair.Label))"
-            Status    = if ($running) { "Healthy" } else { "Warning" }
-            Detail    = "State=$($app.State)"
+            Component = "AppGW ($($pair.Label))"
+            Status    = if ($healthy) { "Healthy" } else { "Warning" }
+            Detail    = "Provisioning=$($appgw.ProvisioningState), Operational=$($appgw.OperationalState)"
         }
-        Write-Output "  $($pair.Name): $($app.State)"
+        Write-Output "  $($pair.Name): Provisioning=$($appgw.ProvisioningState) Operational=$($appgw.OperationalState)"
     }
     catch {
-        $results += @{ Component = "AppService ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message }
+        $results += @{ Component = "AppGW ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message }
         Write-Warning "  $($pair.Name): $($_.Exception.Message)"
     }
 }

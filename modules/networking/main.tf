@@ -125,6 +125,78 @@ locals {
   sqlmi_public_ep_subnets = var.enable_sqlmi_public_endpoint ? local.sqlmi_subnets : {}
 }
 
+#--------------------------------------------------------------
+# Application Gateway NSG Rules
+# GatewayManager (v2 control plane), LoadBalancer, FrontDoor, Deny
+#--------------------------------------------------------------
+locals {
+  appgw_subnets = { for k, v in var.subnets : k => v if v.is_appgw_subnet }
+}
+
+resource "azurerm_network_security_rule" "appgw_gateway_manager" {
+  for_each = local.appgw_subnets
+
+  name                        = "Allow_GatewayManager"
+  priority                    = 100
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "65200-65535"
+  source_address_prefix       = "GatewayManager"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
+resource "azurerm_network_security_rule" "appgw_load_balancer" {
+  for_each = local.appgw_subnets
+
+  name                        = "Allow_AzureLoadBalancer"
+  priority                    = 110
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = "AzureLoadBalancer"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
+resource "azurerm_network_security_rule" "appgw_frontdoor_443" {
+  for_each = local.appgw_subnets
+
+  name                        = "Allow_FrontDoor_HTTPS_443"
+  priority                    = 120
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "AzureFrontDoor.Backend"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
+resource "azurerm_network_security_rule" "appgw_deny_internet" {
+  for_each = local.appgw_subnets
+
+  name                        = "Deny_Internet_Inbound"
+  priority                    = 4000
+  direction                   = "Inbound"
+  access                      = "Deny"
+  protocol                    = "*"
+  source_port_range           = "*"
+  destination_port_range      = "*"
+  source_address_prefix       = "Internet"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
 resource "azurerm_network_security_rule" "sqlmi_public_endpoint_3342" {
   for_each = local.sqlmi_public_ep_subnets
 

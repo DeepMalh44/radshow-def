@@ -22,3 +22,8 @@ output "lock_id" {
   description = "Resource ID of the management lock (empty if not enabled)"
   value       = try(azurerm_management_lock.this[0].id, "")
 }
+
+output "appgw_cert_secret_id" {
+  description = "Versionless secret ID of the AppGW self-signed certificate (null if not generated)"
+  value       = try(azurerm_key_vault_certificate.appgw_ssl[0].versionless_secret_id, null)
+}

@@ -182,7 +182,7 @@ else {
                     -OriginGroupName $og.Name
 
                 foreach ($origin in $origins) {
-                    $isPrimary = $origin.HostName -match $Config.PrimaryRegionShort
+                    $isPrimary = $origin.Name -match 'primary'
                     $newPriority = if ($isPrimary) { 1 } else { 2 }
 
                     Write-Host "  Origin: $($origin.Name) -> Priority $newPriority"

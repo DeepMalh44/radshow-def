@@ -113,9 +113,7 @@ try {
             -OriginGroupName $og.Name
 
         foreach ($origin in $origins) {
-            $isExpectedPrimary = $origin.HostName -match $(
-                if ($OperationType -eq "failover") { $Config.SecondaryRegionShort } else { $Config.PrimaryRegionShort }
-            )
+            $isExpectedPrimary = $origin.Name -match $(if ($OperationType -eq "failover") { 'secondary' } else { 'primary' })
 
             $expectedPrio = if ($isExpectedPrimary) { 1 } else { 2 }
             $prioCorrect = $origin.Priority -eq $expectedPrio
@@ -186,23 +184,23 @@ catch {
 
 Write-Output ""
 
-# ── 6. App Service (Web App) Status ────────────────────────────────────────
-Write-Output "[VALIDATE] App Service (Web App) Status"
-$expectedActiveAppSvc = if ($OperationType -eq "failover") { $Config.AppServiceSecondaryName } else { $Config.AppServicePrimaryName }
-$expectedActiveAppSvcRG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
+# ── 6. Application Gateway Status ──────────────────────────────────────────
+Write-Output "[VALIDATE] Application Gateway"
+$expectedActiveAppGw = if ($OperationType -eq "failover") { $Config.AppGwSecondaryName } else { $Config.AppGwPrimaryName }
+$expectedActiveAppGwRG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
 
 try {
-    $appSvc = Get-AzWebApp -ResourceGroupName $expectedActiveAppSvcRG -Name $expectedActiveAppSvc -ErrorAction Stop
-    $running = $appSvc.State -eq "Running"
+    $appgw = Get-AzApplicationGateway -ResourceGroupName $expectedActiveAppGwRG -Name $expectedActiveAppGw -ErrorAction Stop
+    $appgwOk = $appgw.ProvisioningState -eq "Succeeded" -and $appgw.OperationalState -eq "Running"
     $validationResults += @{
-        Check  = "Active App Service"
-        Pass   = $running
-        Detail = "$expectedActiveAppSvc State=$($appSvc.State)"
+        Check  = "Active AppGW"
+        Pass   = $appgwOk
+        Detail = "$expectedActiveAppGw Provisioning=$($appgw.ProvisioningState) Operational=$($appgw.OperationalState)"
     }
-    Write-Output "  $expectedActiveAppSvc : $($appSvc.State) $(if ($running) {'[PASS]'} else {'[FAIL]'})"
+    Write-Output "  $expectedActiveAppGw : $($appgw.OperationalState) $(if ($appgwOk) {'[PASS]'} else {'[FAIL]'})"
 }
 catch {
-    $validationResults += @{ Check = "Active App Service"; Pass = $false; Detail = $_.Exception.Message }
+    $validationResults += @{ Check = "Active AppGW"; Pass = $false; Detail = $_.Exception.Message }
     Write-Warning "  [FAIL] $($_.Exception.Message)"
 }
 

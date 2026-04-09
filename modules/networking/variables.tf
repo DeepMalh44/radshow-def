@@ -28,6 +28,7 @@ variable "subnets" {
     }))
     is_sqlmi_subnet   = optional(bool, false)
     is_apim_subnet    = optional(bool, false)
+    is_appgw_subnet   = optional(bool, false)
     service_endpoints = optional(list(string), [])
   }))
 }

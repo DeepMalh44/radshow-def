@@ -152,8 +152,7 @@ try {
                 -OriginGroupName $og.Name
 
             foreach ($origin in $origins) {
-                $isSecondary = $origin.HostName -match $Config.SecondaryRegionShort -or
-                               $origin.HostName -match "ncus"
+                $isSecondary = $origin.Name -match 'secondary'
                 $newPriority = if ($isSecondary) { 1 } else { 2 }
 
                 Update-AzFrontDoorCdnOrigin `

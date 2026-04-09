@@ -8,6 +8,11 @@ output "profile_name" {
   value       = azurerm_cdn_frontdoor_profile.this.name
 }
 
+output "front_door_id" {
+  description = "The resource GUID of the Front Door profile (used for X-Azure-FDID header validation)"
+  value       = azurerm_cdn_frontdoor_profile.this.resource_guid
+}
+
 output "endpoint_ids" {
   description = "Map of endpoint names to their IDs"
   value = {

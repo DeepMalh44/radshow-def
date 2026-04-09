@@ -108,6 +108,10 @@ $global:DrConfig = @{
     AutomationPrimaryName  = "aa-$ProjectName-$Environment-dr-$pri"
     AutomationSecondaryName = "aa-$ProjectName-$Environment-dr-$sec"
 
+    # Application Gateway (dual-region for AppGW-fronted architecture)
+    AppGwPrimaryName   = "appgw-$ProjectName-$Environment-$pri"
+    AppGwSecondaryName = "appgw-$ProjectName-$Environment-$sec"
+
     # Front Door endpoint for E2E validation (discovered dynamically below)
     FrontDoorEndpoint = ""
 }

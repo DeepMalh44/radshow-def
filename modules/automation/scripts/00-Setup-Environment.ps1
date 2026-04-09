@@ -63,9 +63,9 @@ $global:DrConfig = @{
     FuncAppPrimaryName     = "func-$ProjectName-$Environment-scus"
     FuncAppSecondaryName   = "func-$ProjectName-$Environment-ncus"
 
-    # App Services (web app)
-    AppServicePrimaryName  = "app-$ProjectName-$Environment-scus"
-    AppServiceSecondaryName = "app-$ProjectName-$Environment-ncus"
+    # Application Gateway (dual-region)
+    AppGwPrimaryName   = "appgw-$ProjectName-$Environment-scus"
+    AppGwSecondaryName = "appgw-$ProjectName-$Environment-ncus"
 
     # Container Apps
     ContainerAppPrimaryName  = "ca-products-$ProjectName-$Environment-scus"

@@ -197,7 +197,7 @@ else {
                 -ErrorAction Stop
 
             foreach ($origin in $origins) {
-                $isSecondary = $origin.HostName -match $Config.SecondaryRegionShort
+                $isSecondary = $origin.Name -match 'secondary'
                 $newPriority = if ($isSecondary) { 1 } else { 2 }
 
                 Write-Host "  Origin: $($origin.Name) -> Priority $newPriority"

@@ -205,6 +205,32 @@ foreach ($pair in @(
 
 Write-Host ""
 
+# ── 6. Application Gateways (dual-region) ──────────────────────────────
+Write-Host "[CAPTURE] Application Gateway Status" -ForegroundColor Yellow
+foreach ($pair in @(
+    @{ Name = $Config.AppGwPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
+    @{ Name = $Config.AppGwSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
+)) {
+    try {
+        $appgw = Get-AzApplicationGateway -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
+        $evidence.Components["AppGW_$($pair.Label)"] = @{
+            Name              = $pair.Name
+            ProvisioningState = $appgw.ProvisioningState
+            OperationalState  = $appgw.OperationalState
+        }
+        Write-Host "  $($pair.Label): $($pair.Name) Provisioning=$($appgw.ProvisioningState) Operational=$($appgw.OperationalState)" -ForegroundColor Green
+    }
+    catch {
+        $evidence.Components["AppGW_$($pair.Label)"] = @{
+            Name  = $pair.Name
+            State = "Unreachable"
+        }
+        Write-Host "  $($pair.Label): Not reachable" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+
 # ── 7. Activity Logs ───────────────────────────────────────────────────
 Write-Host "[CAPTURE] Activity Logs (drill window)" -ForegroundColor Yellow
 try {

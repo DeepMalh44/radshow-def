@@ -114,7 +114,7 @@ try {
             -OriginGroupName $og.Name
 
         foreach ($origin in $origins) {
-            $isExpectedPrimary = $origin.HostName -match $expectedPrimaryShort
+            $isExpectedPrimary = $origin.Name -match $(if ($OperationType -eq "failover") { 'secondary' } else { 'primary' })
             $expectedPrio = if ($isExpectedPrimary) { 1 } else { 2 }
             $prioCorrect = $origin.Priority -eq $expectedPrio
 
@@ -200,6 +200,50 @@ try {
 }
 catch {
     $validationResults += @{ Check = "Active Container App"; Pass = $false; Detail = $_.Exception.Message }
+    Write-Host "  [FAIL] $($_.Exception.Message)" -ForegroundColor Red
+}
+
+Write-Host ""
+
+# ── 7. Application Gateway Backend Health ───────────────────────────────
+Write-Host "[VALIDATE] Application Gateway Backend Health" -ForegroundColor Yellow
+$expectedActiveAppGw = if ($OperationType -eq "failover") { $Config.AppGwSecondaryName } else { $Config.AppGwPrimaryName }
+$expectedActiveAppGwRG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
+
+try {
+    $appgw = Get-AzApplicationGateway -ResourceGroupName $expectedActiveAppGwRG -Name $expectedActiveAppGw -ErrorAction Stop
+    $appgwOk = $appgw.ProvisioningState -eq "Succeeded" -and $appgw.OperationalState -eq "Running"
+    $validationResults += @{
+        Check  = "AppGW Active ($expectedActiveAppGw)"
+        Pass   = $appgwOk
+        Detail = "Provisioning=$($appgw.ProvisioningState), Operational=$($appgw.OperationalState)"
+    }
+    $color = if ($appgwOk) { "Green" } else { "Red" }
+    Write-Host "  $expectedActiveAppGw : $($appgw.OperationalState) $(if ($appgwOk) {'[PASS]'} else {'[FAIL]'})" -ForegroundColor $color
+
+    # Backend pool health
+    try {
+        $backendHealth = Get-AzApplicationGatewayBackendHealth -ResourceGroupName $expectedActiveAppGwRG -Name $expectedActiveAppGw -ErrorAction Stop
+        foreach ($pool in $backendHealth.BackendAddressPools) {
+            foreach ($setting in $pool.BackendHttpSettingsCollection) {
+                $poolName = $setting.BackendHttpSettings.Id.Split('/')[-1]
+                $allHealthy = ($setting.Servers | Where-Object { $_.Health -ne "Healthy" }).Count -eq 0
+                $validationResults += @{
+                    Check  = "AppGW Backend: $poolName"
+                    Pass   = $allHealthy
+                    Detail = ($setting.Servers | ForEach-Object { "$($_.Address):$($_.Health)" }) -join ", "
+                }
+                $color = if ($allHealthy) { "Green" } else { "Red" }
+                Write-Host "  Backend $poolName : $(if ($allHealthy) {'[PASS]'} else {'[FAIL]'}) $( ($setting.Servers | ForEach-Object { "$($_.Address):$($_.Health)" }) -join ', ')" -ForegroundColor $color
+            }
+        }
+    }
+    catch {
+        Write-Host "  Backend health probe failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+catch {
+    $validationResults += @{ Check = "AppGW Active"; Pass = $false; Detail = $_.Exception.Message }
     Write-Host "  [FAIL] $($_.Exception.Message)" -ForegroundColor Red
 }
 

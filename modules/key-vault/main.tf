@@ -77,3 +77,52 @@ resource "azurerm_key_vault_secret" "this" {
   value        = var.secrets[each.key]
   key_vault_id = azurerm_key_vault.this.id
 }
+
+###############################################################################
+# Self-signed certificate for Application Gateway TLS listener
+###############################################################################
+resource "azurerm_key_vault_certificate" "appgw_ssl" {
+  count = var.generate_appgw_cert ? 1 : 0
+
+  name         = "appgw-ssl-cert"
+  key_vault_id = azurerm_key_vault.this.id
+
+  certificate_policy {
+    issuer_parameters {
+      name = "Self"
+    }
+
+    key_properties {
+      exportable = true
+      key_size   = 2048
+      key_type   = "RSA"
+      reuse_key  = true
+    }
+
+    secret_properties {
+      content_type = "application/x-pkcs12"
+    }
+
+    x509_certificate_properties {
+      key_usage = [
+        "digitalSignature",
+        "keyEncipherment",
+      ]
+      subject            = "CN=appgw-${var.name_prefix}"
+      validity_in_months = 12
+
+      subject_alternative_names {
+        dns_names = ["*.azurefd.net"]
+      }
+    }
+
+    lifetime_action {
+      action {
+        action_type = "AutoRenew"
+      }
+      trigger {
+        days_before_expiry = 30
+      }
+    }
+  }
+}
