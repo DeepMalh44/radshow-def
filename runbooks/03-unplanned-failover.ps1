@@ -1,15 +1,48 @@
-<#
-.SYNOPSIS
-    Unplanned Failover - Forced failover with explicit danger warnings
-.DESCRIPTION
-    Simulates a real outage scenario by executing a forced failover (AllowDataLoss).
-    Includes double-confirmation gates and explicit danger warnings.
-    Use for DR drills to test worst-case RTO/RPO.
-.NOTES
-    Version: 1.0.0
-    Tier: 3 (Operator workstation)
-    WARNING: Forced failover may result in data loss.
-#>
+<###############################################################################
+# 03-Unplanned-Failover.ps1
+#
+# PURPOSE:
+#   Simulates a real outage by executing a forced failover with the AllowDataLoss
+#   flag. Used during DR drills to test worst-case RTO/RPO and validate that the
+#   secondary region can take over when the primary is unavailable.
+#
+# ARCHITECTURE:
+#   Front Door (Premium) -> AppGW (WAF_v2) -> APIM (/api/*) | Storage SPA (/*)
+#   SQL MI with Failover Groups provides database-level DR.
+#   Key Vault stores the "active-region" secret read by function apps.
+#
+# WHAT IT DOES (3 steps, double-confirmation gate):
+#   1. Forced SQL MI Failover Group switch (AllowDataLoss - potential data loss!)
+#   2. Wait for secondary to assume Primary role (up to 10 min)
+#   3. Swap Front Door origin priorities + update Key Vault active-region
+#
+# WARNING:
+#   Forced failover uses AllowDataLoss. Any uncommitted transactions on the
+#   primary SQL MI may be permanently lost. Requires typing "FORCE" + "YES".
+#
+# PREREQUISITES:
+#   - Run 00-setup-environment.ps1 first to populate $global:DrConfig
+#   - Operator must have appropriate Azure RBAC permissions
+#
+# ERROR HANDLING:
+#   - Each step has individual try/catch with status tracking
+#   - On failure, error state is auto-dumped to JSON in $env:TEMP
+#   - 06-capture-evidence.ps1 is auto-invoked to snapshot system state
+#   - Partial results are always stored in $global:FailoverResults
+#
+# PARAMETERS:
+#   -Config    : DR configuration hashtable (default: $global:DrConfig)
+#   -DryRun    : Simulate without making changes
+#   -NoPrompt  : Skip double-confirmation gates (for automated runs)
+#
+# OUTPUTS:
+#   $global:FailoverResults   - Array of step result hashtables
+#   $global:FailoverRTO       - Total failover duration in seconds
+#   $global:FailoverStartTime - Drill start timestamp
+#   $global:FailoverErrorLog  - Array of error state captures (if any)
+#
+# VERSION: 1.1.0  |  TIER: 3 (Operator workstation)
+###############################################################################>
 
 [CmdletBinding()]
 param(
@@ -32,6 +65,35 @@ if (-not $Config) {
 
 $drillStart = Get-Date
 $stepResults = @()
+$global:FailoverErrorLog = @()
+
+# ── Helper: Save error state to disk for post-mortem analysis ────────────
+function Save-ErrorState {
+    param(
+        [string]$StepName,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [hashtable[]]$StepResultsSoFar
+    )
+    $errorState = @{
+        Timestamp      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Script         = "03-Unplanned-Failover.ps1"
+        FailedStep     = $StepName
+        ErrorMessage   = $ErrorRecord.Exception.Message
+        ErrorType      = $ErrorRecord.Exception.GetType().FullName
+        StackTrace     = $ErrorRecord.ScriptStackTrace
+        StepsCompleted = $StepResultsSoFar
+        ConfigSnapshot = @{
+            PrimaryRegion    = $Config.PrimaryRegion
+            SecondaryRegion  = $Config.SecondaryRegion
+            FrontDoorProfile = $Config.FrontDoorProfileName
+        }
+    }
+    $fileName = "dr-error-state-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    $filePath = Join-Path $env:TEMP $fileName
+    $errorState | ConvertTo-Json -Depth 5 | Out-File -FilePath $filePath -Encoding UTF8
+    Write-Host "  [ERROR STATE] Diagnostics saved to: $filePath" -ForegroundColor Red
+    $global:FailoverErrorLog += $errorState
+}
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Red
@@ -68,6 +130,10 @@ if (-not $NoPrompt -and -not $DryRun) {
     Write-Host "[CONFIRMED] Proceeding with forced failover..." -ForegroundColor Red
     Write-Host ""
 }
+
+# ── Execute DR steps with error-state capture on failure ────────────────
+$scriptError = $null
+try {
 
 # ── Step 1: Forced SQL MI Failover Group Switch ─────────────────────────
 Write-Host "[STEP 1/3] SQL MI Forced Failover (AllowDataLoss)" -ForegroundColor Yellow
@@ -229,9 +295,19 @@ catch {
         Detail   = $_.Exception.Message
     }
     Write-Host "  [FAILED] $($_.Exception.Message)" -ForegroundColor Red
+        Save-ErrorState -StepName "FD + KV Update" -ErrorRecord $_ -StepResultsSoFar $stepResults
 }
 
-# ── Summary ─────────────────────────────────────────────────────────────
+} catch {
+    # ── Global error handler ────────────────────────────────────────────
+    $scriptError = $_
+    Save-ErrorState -StepName "Script execution" -ErrorRecord $_ -StepResultsSoFar $stepResults
+    Write-Host ""
+    Write-Host "[FATAL] Script failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[FATAL] Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+} finally {
+
+# ── Summary (always runs, even after failure) ───────────────────────────
 $drillEnd = Get-Date
 $totalDuration = ($drillEnd - $drillStart).TotalSeconds
 
@@ -251,6 +327,26 @@ foreach ($step in $stepResults) {
     Write-Host "  $($step.Step): $($step.Status) ($($step.Duration)s) - $($step.Detail)" -ForegroundColor $color
 }
 
+# ── Auto-capture evidence on failure ────────────────────────────────────
+$failedSteps = @($stepResults | Where-Object { $_.Status -eq "Failed" })
+if ($failedSteps.Count -gt 0 -or $scriptError) {
+    Write-Host ""
+    Write-Host "[AUTO-CAPTURE] Failure detected - invoking evidence capture..." -ForegroundColor Yellow
+    try {
+        $captureScript = Join-Path $PSScriptRoot "06-capture-evidence.ps1"
+        if (Test-Path $captureScript) {
+            & $captureScript -Config $Config -DrillStartTime $drillStart -DrillEndTime (Get-Date) -DrillType "error-capture"
+            Write-Host "[AUTO-CAPTURE] Evidence captured successfully." -ForegroundColor Green
+        }
+        else {
+            Write-Host "[AUTO-CAPTURE] 06-capture-evidence.ps1 not found at: $captureScript" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "[AUTO-CAPTURE] Evidence capture failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 $global:FailoverResults = $stepResults
 $global:FailoverRTO = $totalDuration
 $global:FailoverStartTime = $drillStart
@@ -258,3 +354,5 @@ $global:FailoverStartTime = $drillStart
 Write-Host ""
 Write-Host "Results stored in `$global:FailoverResults, `$global:FailoverRTO" -ForegroundColor Gray
 Write-Host "Proceed with: .\05-validate-failover.ps1 -OperationType failover" -ForegroundColor Gray
+
+} # end finally

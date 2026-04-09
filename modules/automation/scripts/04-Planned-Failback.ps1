@@ -1,16 +1,39 @@
-<#
-.SYNOPSIS
-    Planned Failback - Return to primary region
-.DESCRIPTION
-    Reverses a previous failover, restoring primary region as active:
-    1. SQL MI FOG switch back to primary
-    2. Wait for replication sync
-    3. Front Door origin priority restore
-    4. Key Vault active-region restore
-.NOTES
-    Version: 1.0.0
-    Requires: 00-Setup-Environment.ps1 executed first
-#>
+<###############################################################################
+# 04-Planned-Failback.ps1  (Tier 2 - Azure Automation / Headless)
+#
+# PURPOSE:
+#   Reverses a previous failover by restoring the primary region as the active
+#   region. Designed for headless execution via Azure Automation runbooks to
+#   return the system to its normal operating state.
+#
+# ARCHITECTURE:
+#   Front Door (Premium) -> AppGW (WAF_v2) -> APIM (/api/*) | Storage SPA (/*)
+#   SQL MI with Failover Groups provides database-level DR.
+#   Key Vault stores the "active-region" secret read by function apps.
+#
+# WHAT IT DOES (4 steps, no operator prompts):
+#   1. SQL MI Failover Group switch back to primary region (zero data loss)
+#   2. Wait for replication sync confirmation (up to 5 min)
+#   3. Restore Front Door origin priorities (primary -> priority 1)
+#   4. Restore Key Vault "active-region" secret to primary region
+#
+# PREREQUISITES:
+#   - 00-Setup-Environment.ps1 must have populated $global:DrConfig
+#   - A previous failover (02 or 03) must have been executed
+#   - Azure Automation managed identity must have RBAC permissions
+#
+# ERROR HANDLING:
+#   - Each step has individual try/catch with status tracking
+#   - On failure, error state is auto-dumped to JSON for diagnostics
+#   - 06-Capture-Evidence.ps1 is auto-invoked to snapshot system state
+#   - Partial results are always stored in $global:FailbackResults
+#
+# PARAMETERS:
+#   -Config  : DR configuration hashtable (default: $global:DrConfig)
+#   -DryRun  : Simulate without making changes
+#
+# VERSION: 1.1.0  |  TIER: 2 (Azure Automation)
+###############################################################################>
 
 param(
     [Parameter(Mandatory = $false)]
@@ -29,6 +52,35 @@ if (-not $Config) {
 
 $drillStart = Get-Date
 $stepResults = @()
+$global:FailoverErrorLog = @()
+
+# ── Helper: Save error state to disk for post-mortem analysis ────────────
+function Save-ErrorState {
+    param(
+        [string]$StepName,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [hashtable[]]$StepResultsSoFar
+    )
+    $errorState = @{
+        Timestamp      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Script         = "04-Planned-Failback.ps1 (Tier2)"
+        FailedStep     = $StepName
+        ErrorMessage   = $ErrorRecord.Exception.Message
+        ErrorType      = $ErrorRecord.Exception.GetType().FullName
+        StackTrace     = $ErrorRecord.ScriptStackTrace
+        StepsCompleted = $StepResultsSoFar
+        ConfigSnapshot = @{
+            PrimaryRegion    = $Config.PrimaryRegion
+            SecondaryRegion  = $Config.SecondaryRegion
+            FrontDoorProfile = $Config.FrontDoorProfileName
+        }
+    }
+    $fileName = "dr-error-state-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    $filePath = Join-Path $env:TEMP $fileName
+    $errorState | ConvertTo-Json -Depth 5 | Out-File -FilePath $filePath -Encoding UTF8
+    Write-Warning "[ERROR STATE] Diagnostics saved to: $filePath"
+    $global:FailoverErrorLog += $errorState
+}
 
 Write-Output "============================================"
 Write-Output "  RAD Showcase DR Drill - Planned Failback"
@@ -40,7 +92,9 @@ if ($DryRun) {
     Write-Output "[DRY RUN] No changes will be made."
     Write-Output ""
 }
-
+# ── Execute DR steps with error-state capture on failure ────────────────
+$scriptError = $null
+try {
 # ── Step 1: SQL MI Failback to Primary ──────────────────────────────────────
 Write-Output "[STEP 1] SQL MI Failback to Primary Region"
 $stepStart = Get-Date
@@ -181,6 +235,7 @@ catch {
         Detail   = $_.Exception.Message
     }
     Write-Warning "Front Door restore failed: $($_.Exception.Message)"
+    Save-ErrorState -StepName "Front Door Restore" -ErrorRecord $_ -StepResultsSoFar $stepResults
 }
 
 Write-Output ""
@@ -216,7 +271,14 @@ catch {
     Write-Warning "Key Vault restore failed: $($_.Exception.Message)"
 }
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+} catch {
+    # ── Global error handler ────────────────────────────────────────────
+    $scriptError = $_
+    Save-ErrorState -StepName "Script execution" -ErrorRecord $_ -StepResultsSoFar $stepResults
+    Write-Error "[FATAL] Script failed: $($_.Exception.Message)"
+} finally {
+
+# ── Summary (always runs, even after failure) ───────────────────────────
 $drillEnd = Get-Date
 $totalDuration = ($drillEnd - $drillStart).TotalSeconds
 
@@ -234,4 +296,25 @@ foreach ($sr in $stepResults) {
 Write-Output ""
 Write-Output "[SUCCESS] System restored to primary region."
 
+# ── Auto-capture evidence on failure ────────────────────────────────────
+$failedSteps = @($stepResults | Where-Object { $_.Status -eq "Failed" })
+if ($failedSteps.Count -gt 0 -or $scriptError) {
+    Write-Warning "[AUTO-CAPTURE] Failure detected - invoking evidence capture..."
+    try {
+        $captureScript = Join-Path $PSScriptRoot "06-Capture-Evidence.ps1"
+        if (Test-Path $captureScript) {
+            & $captureScript -Config $Config -DrillStartTime $drillStart -DrillEndTime (Get-Date) -DrillType "error-capture"
+            Write-Output "[AUTO-CAPTURE] Evidence captured successfully."
+        }
+        else {
+            Write-Warning "[AUTO-CAPTURE] 06-Capture-Evidence.ps1 not found at: $captureScript"
+        }
+    }
+    catch {
+        Write-Warning "[AUTO-CAPTURE] Evidence capture failed: $($_.Exception.Message)"
+    }
+}
+
 $global:FailbackResults = $stepResults
+
+} # end finally

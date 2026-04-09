@@ -1,14 +1,41 @@
-<#
-.SYNOPSIS
-    Unplanned Failover - Simulated outage with forced failover
-.DESCRIPTION
-    Simulates a real outage scenario by executing a forced failover
-    that allows potential data loss (AllowDataLoss flag).
-    Use for DR drills to test worst-case RTO/RPO.
-.NOTES
-    Version: 1.0.0
-    WARNING: Forced failover may cause data loss in production.
-#>
+<###############################################################################
+# 03-Unplanned-Failover.ps1  (Tier 2 - Azure Automation / Headless)
+#
+# PURPOSE:
+#   Simulates a real outage by executing a forced failover with the AllowDataLoss
+#   flag. Designed for headless execution via Azure Automation runbooks to test
+#   worst-case RTO/RPO.
+#
+# ARCHITECTURE:
+#   Front Door (Premium) -> AppGW (WAF_v2) -> APIM (/api/*) | Storage SPA (/*)
+#   SQL MI with Failover Groups provides database-level DR.
+#   Key Vault stores the "active-region" secret read by function apps.
+#
+# WHAT IT DOES (3 steps, no operator prompts):
+#   1. Forced SQL MI Failover Group switch (AllowDataLoss - potential data loss!)
+#   2. Wait for secondary to assume Primary role (up to 10 min)
+#   3. Swap Front Door origin priorities + update Key Vault active-region
+#
+# WARNING:
+#   Forced failover uses AllowDataLoss. Any uncommitted transactions on the
+#   primary SQL MI may be permanently lost.
+#
+# PREREQUISITES:
+#   - 00-Setup-Environment.ps1 must have populated $global:DrConfig
+#   - Azure Automation managed identity must have RBAC permissions
+#
+# ERROR HANDLING:
+#   - Each step has individual try/catch with status tracking
+#   - On failure, error state is auto-dumped to JSON for diagnostics
+#   - 06-Capture-Evidence.ps1 is auto-invoked to snapshot system state
+#   - Partial results are always stored in $global:FailoverResults
+#
+# PARAMETERS:
+#   -Config  : DR configuration hashtable (default: $global:DrConfig)
+#   -DryRun  : Simulate without making changes
+#
+# VERSION: 1.1.0  |  TIER: 2 (Azure Automation)
+###############################################################################>
 
 param(
     [Parameter(Mandatory = $false)]
@@ -27,6 +54,35 @@ if (-not $Config) {
 
 $drillStart = Get-Date
 $stepResults = @()
+$global:FailoverErrorLog = @()
+
+# ── Helper: Save error state to disk for post-mortem analysis ────────────
+function Save-ErrorState {
+    param(
+        [string]$StepName,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [hashtable[]]$StepResultsSoFar
+    )
+    $errorState = @{
+        Timestamp      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Script         = "03-Unplanned-Failover.ps1 (Tier2)"
+        FailedStep     = $StepName
+        ErrorMessage   = $ErrorRecord.Exception.Message
+        ErrorType      = $ErrorRecord.Exception.GetType().FullName
+        StackTrace     = $ErrorRecord.ScriptStackTrace
+        StepsCompleted = $StepResultsSoFar
+        ConfigSnapshot = @{
+            PrimaryRegion    = $Config.PrimaryRegion
+            SecondaryRegion  = $Config.SecondaryRegion
+            FrontDoorProfile = $Config.FrontDoorProfileName
+        }
+    }
+    $fileName = "dr-error-state-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    $filePath = Join-Path $env:TEMP $fileName
+    $errorState | ConvertTo-Json -Depth 5 | Out-File -FilePath $filePath -Encoding UTF8
+    Write-Warning "[ERROR STATE] Diagnostics saved to: $filePath"
+    $global:FailoverErrorLog += $errorState
+}
 
 Write-Output "============================================"
 Write-Output "  RAD Showcase DR Drill - UNPLANNED Failover"
@@ -40,7 +96,9 @@ if ($DryRun) {
     Write-Output "[DRY RUN] No changes will be made."
     Write-Output ""
 }
-
+# ── Execute DR steps with error-state capture on failure ────────────────
+$scriptError = $null
+try {
 # ── Step 1: Forced SQL MI Failover Group Switch ─────────────────────────────
 Write-Output "[STEP 1] SQL MI Forced Failover (AllowDataLoss)"
 $stepStart = Get-Date
@@ -186,9 +244,17 @@ catch {
         Detail   = $_.Exception.Message
     }
     Write-Warning "FD/KV update failed: $($_.Exception.Message)"
+    Save-ErrorState -StepName "FD + KV Update" -ErrorRecord $_ -StepResultsSoFar $stepResults
 }
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+} catch {
+    # ── Global error handler ────────────────────────────────────────────
+    $scriptError = $_
+    Save-ErrorState -StepName "Script execution" -ErrorRecord $_ -StepResultsSoFar $stepResults
+    Write-Error "[FATAL] Script failed: $($_.Exception.Message)"
+} finally {
+
+# ── Summary (always runs, even after failure) ───────────────────────────
 $drillEnd = Get-Date
 $totalDuration = ($drillEnd - $drillStart).TotalSeconds
 
@@ -203,5 +269,26 @@ foreach ($sr in $stepResults) {
     Write-Output "  $icon $($sr.Step): $($sr.Duration)s"
 }
 
+# ── Auto-capture evidence on failure ────────────────────────────────────
+$failedSteps = @($stepResults | Where-Object { $_.Status -eq "Failed" })
+if ($failedSteps.Count -gt 0 -or $scriptError) {
+    Write-Warning "[AUTO-CAPTURE] Failure detected - invoking evidence capture..."
+    try {
+        $captureScript = Join-Path $PSScriptRoot "06-Capture-Evidence.ps1"
+        if (Test-Path $captureScript) {
+            & $captureScript -Config $Config -DrillStartTime $drillStart -DrillEndTime (Get-Date) -DrillType "error-capture"
+            Write-Output "[AUTO-CAPTURE] Evidence captured successfully."
+        }
+        else {
+            Write-Warning "[AUTO-CAPTURE] 06-Capture-Evidence.ps1 not found at: $captureScript"
+        }
+    }
+    catch {
+        Write-Warning "[AUTO-CAPTURE] Evidence capture failed: $($_.Exception.Message)"
+    }
+}
+
 $global:FailoverResults = $stepResults
 $global:FailoverRTO = $totalDuration
+
+} # end finally

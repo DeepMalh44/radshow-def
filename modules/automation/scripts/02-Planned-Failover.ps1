@@ -1,17 +1,38 @@
-<#
-.SYNOPSIS
-    Planned Failover - Orchestrated DR failover with zero data loss
-.DESCRIPTION
-    Executes a graceful, planned failover:
-    1. SQL MI Failover Group switch (no data loss)
-    2. Wait for replication sync
-    3. Front Door origin priority swap
-    4. Update Key Vault active-region
-    5. Validate new primary
-.NOTES
-    Version: 1.0.0
-    Requires: 00-Setup-Environment.ps1 executed first
-#>
+<###############################################################################
+# 02-Planned-Failover.ps1  (Tier 2 - Azure Automation / Headless)
+#
+# PURPOSE:
+#   Executes a graceful, planned failover of the RAD Showcase application from
+#   the primary region to the secondary region. Designed for headless execution
+#   via Azure Automation runbooks with zero data loss.
+#
+# ARCHITECTURE:
+#   Front Door (Premium) -> AppGW (WAF_v2) -> APIM (/api/*) | Storage SPA (/*)
+#   SQL MI with Failover Groups provides database-level DR.
+#   Key Vault stores the "active-region" secret read by function apps.
+#
+# WHAT IT DOES (4 steps, no operator prompts):
+#   1. SQL MI Failover Group switch to secondary region (zero data loss)
+#   2. Wait for replication sync confirmation (up to 5 min)
+#   3. Swap Front Door origin priorities (secondary -> priority 1)
+#   4. Update Key Vault "active-region" secret
+#
+# PREREQUISITES:
+#   - 00-Setup-Environment.ps1 must have populated $global:DrConfig
+#   - Azure Automation managed identity must have RBAC permissions
+#
+# ERROR HANDLING:
+#   - Each step has individual try/catch with status tracking
+#   - On failure, error state is auto-dumped to JSON for diagnostics
+#   - 06-Capture-Evidence.ps1 is auto-invoked to snapshot system state
+#   - Partial results are always stored in $global:FailoverResults
+#
+# PARAMETERS:
+#   -Config  : DR configuration hashtable (default: $global:DrConfig)
+#   -DryRun  : Simulate without making changes
+#
+# VERSION: 1.1.0  |  TIER: 2 (Azure Automation)
+###############################################################################>
 
 param(
     [Parameter(Mandatory = $false)]
@@ -30,6 +51,35 @@ if (-not $Config) {
 
 $drillStart = Get-Date
 $stepResults = @()
+$global:FailoverErrorLog = @()
+
+# ── Helper: Save error state to disk for post-mortem analysis ────────────
+function Save-ErrorState {
+    param(
+        [string]$StepName,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [hashtable[]]$StepResultsSoFar
+    )
+    $errorState = @{
+        Timestamp      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        Script         = "02-Planned-Failover.ps1 (Tier2)"
+        FailedStep     = $StepName
+        ErrorMessage   = $ErrorRecord.Exception.Message
+        ErrorType      = $ErrorRecord.Exception.GetType().FullName
+        StackTrace     = $ErrorRecord.ScriptStackTrace
+        StepsCompleted = $StepResultsSoFar
+        ConfigSnapshot = @{
+            PrimaryRegion    = $Config.PrimaryRegion
+            SecondaryRegion  = $Config.SecondaryRegion
+            FrontDoorProfile = $Config.FrontDoorProfileName
+        }
+    }
+    $fileName = "dr-error-state-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+    $filePath = Join-Path $env:TEMP $fileName
+    $errorState | ConvertTo-Json -Depth 5 | Out-File -FilePath $filePath -Encoding UTF8
+    Write-Warning "[ERROR STATE] Diagnostics saved to: $filePath"
+    $global:FailoverErrorLog += $errorState
+}
 
 Write-Output "============================================"
 Write-Output "  RAD Showcase DR Drill - Planned Failover"
@@ -41,7 +91,9 @@ if ($DryRun) {
     Write-Output "[DRY RUN] No changes will be made."
     Write-Output ""
 }
-
+# ── Execute DR steps with error-state capture on failure ────────────────
+$scriptError = $null
+try {
 # ── Step 1: SQL MI Failover Group Switch ────────────────────────────────────
 Write-Output "[STEP 1] SQL MI Failover Group Switch"
 $stepStart = Get-Date
@@ -200,6 +252,7 @@ catch {
         Detail   = $_.Exception.Message
     }
     Write-Warning "Front Door priority swap failed: $($_.Exception.Message)"
+    Save-ErrorState -StepName "Front Door Priority Swap" -ErrorRecord $_ -StepResultsSoFar $stepResults
 }
 
 Write-Output "  Duration: $(((Get-Date) - $stepStart).TotalSeconds)s"
@@ -240,7 +293,14 @@ catch {
 
 Write-Output ""
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+} catch {
+    # ── Global error handler ────────────────────────────────────────────
+    $scriptError = $_
+    Save-ErrorState -StepName "Script execution" -ErrorRecord $_ -StepResultsSoFar $stepResults
+    Write-Error "[FATAL] Script failed: $($_.Exception.Message)"
+} finally {
+
+# ── Summary (always runs, even after failure) ───────────────────────────
 $drillEnd = Get-Date
 $totalDuration = ($drillEnd - $drillStart).TotalSeconds
 
@@ -257,5 +317,26 @@ foreach ($sr in $stepResults) {
     Write-Output "  $icon $($sr.Step): $($sr.Duration)s - $($sr.Detail)"
 }
 
+# ── Auto-capture evidence on failure ────────────────────────────────────
+$failedSteps = @($stepResults | Where-Object { $_.Status -eq "Failed" })
+if ($failedSteps.Count -gt 0 -or $scriptError) {
+    Write-Warning "[AUTO-CAPTURE] Failure detected - invoking evidence capture..."
+    try {
+        $captureScript = Join-Path $PSScriptRoot "06-Capture-Evidence.ps1"
+        if (Test-Path $captureScript) {
+            & $captureScript -Config $Config -DrillStartTime $drillStart -DrillEndTime (Get-Date) -DrillType "error-capture"
+            Write-Output "[AUTO-CAPTURE] Evidence captured successfully."
+        }
+        else {
+            Write-Warning "[AUTO-CAPTURE] 06-Capture-Evidence.ps1 not found at: $captureScript"
+        }
+    }
+    catch {
+        Write-Warning "[AUTO-CAPTURE] Evidence capture failed: $($_.Exception.Message)"
+    }
+}
+
 $global:FailoverResults = $stepResults
 $global:FailoverRTO = $totalDuration
+
+} # end finally
