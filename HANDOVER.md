@@ -15,14 +15,16 @@
 
 - **Active-Passive DR** across two Azure regions per environment
 - **Azure Front Door** (Premium, SKU `Premium_AzureFrontDoor`) routes traffic via single endpoint `ep-spa`:
-  - `route-api` → `/api/*` → `og-api` (APIM gateways — global primary + regional secondary)
-  - `route-spa` → `/*` → `og-spa` (Storage static website endpoints, with cache + compression)
-  - `route-app` → `/app/*` → `og-app` (App Service Products web UI)
-- **WAF Policy** attached to Front Door (Prevention mode) with managed rule sets and custom rate-limiting rules
+  - `route-all` → `/*` → `og-appgw` (Application Gateway origins — primary + secondary)
+  - FD terminates TLS from clients, forwards to AppGW on **HTTP (port 80)** over Azure backbone
+- **Application Gateway** (WAF_v2) per region performs URL path-based routing:
+  - `/api/*` → APIM gateway backend pool
+  - `/*` (default) → Storage static website backend pool
+  - WAF with OWASP 3.2 rules + custom `X-Azure-FDID` validation + Host header exclusion (rule 920350)
+- **WAF Policy** on Front Door (Prevention mode) with managed rule sets and custom rate-limiting rules
 - **APIM** proxies all API calls to backend Function Apps (per-region) and routes `/products` to Container Apps (Products API)
-- **App Service** serves the Products web UI at `/app/Products` (calls APIM internally for data, connects to SQL MI via FOG listener). Uses `ASPNETCORE_PATHBASE=/app` for path-based routing.
 - **Container Apps** run the Products API (`ca-product-api`) in internal (VNet-integrated) Container App Environments. Requires private DNS zones with wildcard + apex A records linked to both VNets.
-- **SQL MI Failover Group** (60-minute grace period, automatic failover) replicates databases across regions; all compute (Function App, App Service, Container Apps) uses the FOG listener endpoint
+- **SQL MI Failover Group** (60-minute grace period, automatic failover) replicates databases across regions; all compute (Function App, Container Apps) uses the FOG listener endpoint
 - **Redis Cache** deployed independently per region (Premium P1)
 - **Key Vault** per region — locked down (`public-network-access=disabled` / `default-action=Deny`). Both contain `active-region` secret indicating which region is primary.
 
@@ -175,7 +177,7 @@ terragrunt apply --all --non-interactive \
 8. `sql-mi` / `sql-mi-secondary` → `sql-mi-fog`
 9. `apim`
 10. `function-app` / `function-app-secondary`
-11. `app-service` / `app-service-secondary`
+11. `application-gateway` / `application-gateway-secondary`
 12. `front-door`
 13. `role-assignments`
 14. `automation`
@@ -262,18 +264,17 @@ Repeat for both primary and secondary region CAEs.
 Test all routes through Front Door:
 
 ```bash
-# SPA (static site)
+# SPA (static site via AppGW)
 curl -s -o /dev/null -w "%{http_code}" https://ep-spa-{hash}.azurefd.net/
 
-# API (Function App via APIM)
+# API (via AppGW → APIM → Function App)
 curl -s https://ep-spa-{hash}.azurefd.net/api/status
 
-# Products Web UI (App Service)
-curl -s -o /dev/null -w "%{http_code}" https://ep-spa-{hash}.azurefd.net/app/Products
+# API products
+curl -s https://ep-spa-{hash}.azurefd.net/api/products
 
 # Direct backend health checks
 curl -s https://func-radshow-{env}-{primary}.azurewebsites.net/api/healthz
-curl -s https://app-radshow-{env}-{primary}.azurewebsites.net/app/healthz
 ```
 
 ---
@@ -283,17 +284,17 @@ curl -s https://app-radshow-{env}-{primary}.azurewebsites.net/app/healthz
 | Decision | Rationale |
 |----------|-----------|
 | **Docker containers on Function Apps** | CI/CD deploys container images via `az functionapp config container set`, not zip deploy. Terraform ignores `application_stack` drift via `lifecycle.ignore_changes`. |
+| **Application Gateway (WAF_v2)** | AppGW per region handles URL path-based routing (`/api/*` → APIM, `/*` → SPA Storage). FD forwards to AppGW on HTTP (port 80) due to self-signed KV certs — FD Premium rejects self-signed SSL even with `enforceCertificateNameCheck=false`. |
 | **Container Apps (Products API)** | Internal CAE with VNet integration. APIM routes `/products` to Container Apps. Private DNS zones auto-created by Terraform when `internal_load_balancer_enabled = true`. |
-| **App Service (`og-app`)** | Front Door `/app/*` route to App Service origin group. `ASPNETCORE_PATHBASE=/app` for path-based routing. Connects to SQL MI via FOG listener. |
-| **FOG listener for all compute** | Function App, App Service, and Container Apps all use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
-| **APIM subscriptionRequired off** | `radshow-product-api` has `subscriptionRequired: false` so Container Apps and App Service can call it without a subscription key. |
+| **FOG listener for all compute** | Function App and Container Apps all use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
+| **APIM subscriptionRequired off** | `radshow-product-api` has `subscriptionRequired: false` so Container Apps can call it without a subscription key. |
 | **`cicd_sp_object_id` in env.hcl** | Centralized CICD service principal Object ID used by `role-assignments` module across all environments. |
 | **OIDC (no secrets)** | GitHub Actions authenticate to Azure via Workload Identity Federation — no client secrets to rotate. |
 | **Terragrunt wraps Terraform** | `radshow-def` has reusable modules; `radshow-lic` has per-environment wiring with dependency management. |
 | **APIOps for APIM** | APIM policies/APIs managed as code in `radshow-apim`, published via pipeline (not Terraform). |
-| **Single Front Door endpoint** | SPA + API + App share one endpoint (`ep-spa`) so relative `/api/*` calls work without CORS. |
-| **Active-passive FD routing** | Origins use `priority` (1=primary, 2=secondary). Failover swaps priorities. Health probes use GET requests to detect origin availability. |
-| **AFD Private Link not viable** | South India does not support AFD Private Link; Azure forbids mixing PL + non-PL origins in the same group. Multi-region origin groups cannot use PL with South India as secondary. Use App Service access restrictions (`AzureFrontDoor.Backend` service tag + `X-Azure-FDID` header) as alternative. |
+| **Single Front Door endpoint** | SPA + API share one endpoint (`ep-spa`) so relative `/api/*` calls work without CORS. |
+| **Active-passive FD routing** | AppGW origins use `priority` (1=primary, 2=secondary). Failover swaps priorities. FD health probes use HTTP GET on port 80. |
+| **FD→AppGW HTTP forwarding** | FD terminates TLS from clients, forwards to AppGW on HTTP (port 80) over Azure backbone. Root cause: Azure FD Premium rejects self-signed SSL certs even with `enforceCertificateNameCheck=false`. That flag only skips hostname/SAN matching, NOT CA trust chain validation. |
 | **Storage public access required** | Storage static website endpoints (`$web`) require `publicNetworkAccess=Enabled` for Front Door to reach them. `allowSharedKeyAccess=false` (MI-only auth for management). |
 | **Each region has its own KV** | App Service and Function App in each region point to their local Key Vault (`kv-radshow-{env}-{primary}` / `kv-radshow-{env}-{secondary}`). Both KVs have `active-region` secret set to the same value. |
 
@@ -349,7 +350,7 @@ Quick start:
 ### DR Failover Steps (what the runbooks do)
 
 1. **SQL MI FOG failover** — `az sql instance-failover-group set-primary --location {secondary}`
-2. **Front Door origin priority swap** — all 3 origin groups (`og-api`, `og-spa`, `og-app`): secondary→P1, primary→P2
+2. **Front Door origin priority swap** — `og-appgw`: secondary AppGW→P1, primary AppGW→P2
 3. **Key Vault active-region update** — set `active-region` secret to secondary region in both KVs
 4. **Validation** — health probes, CRUD test via Front Door, region verification
 
@@ -371,43 +372,42 @@ State is shared across all environments. The storage account is **not managed by
 
 | Origin Group | Health Probe Path | Method | Protocol | Interval | Sample Size | Required Successful | Traffic Restoration |
 |-------------|-------------------|--------|----------|----------|-------------|--------------------|--------------------|
-| `og-api` | `/api/healthz` | GET | HTTPS | 30s | 4 | 2 | 10 min |
-| `og-spa` | `/index.html` | GET | HTTPS | 30s | 4 | 2 | 10 min |
-| `og-app` | `/app/healthz` | GET | HTTPS | 30s | 4 | 3 | 10 min |
+| `og-appgw` | `/` | GET | Http | 30s | 4 | 3 | 10 min |
 
-### Origins (STG01 example)
+> **Note**: FD probes AppGW via HTTP (port 80). AppGW handles URL path routing to APIM and Storage backends internally.
+
+### Origins (STG01)
 
 | Origin Group | Origin | Hostname | Priority |
 |-------------|--------|----------|----------|
-| `og-api` | `apim-primary` | `apim-radshow-stg01-cin.azure-api.net` (global) | 1 |
-| `og-api` | `apim-secondary` | `apim-radshow-stg01-cin-southindia-01.regional.azure-api.net` | 2 |
-| `og-spa` | `spa-primary` | `stradshowstg01cin.z29.web.core.windows.net` | 1 |
-| `og-spa` | `spa-secondary` | `stradshowstg01sin.z30.web.core.windows.net` | 2 |
-| `og-app` | `app-primary` | `app-radshow-stg01-cin.azurewebsites.net` | 1 |
-| `og-app` | `app-secondary` | `app-radshow-stg01-sin.azurewebsites.net` | 2 |
+| `og-appgw` | `appgw-primary` | `20.235.72.158` (AppGW cin public IP) | 1 |
+| `og-appgw` | `appgw-secondary` | `20.219.126.137` (AppGW sin public IP) | 2 |
 
-> **Note**: All origins connect over public internet (no Private Link). See "AFD Private Link not viable" in Key Design Decisions.
+> **Important**: Origins use AppGW public IPs. `certificate_name_check_enabled = false` because AppGW uses self-signed KV certs. FD forwards via **HttpOnly** to avoid SSL trust chain rejection.
 
 ### Routes
 
-| Route | Pattern | Origin Group | Cache | Supported Protocols |
-|-------|---------|-------------|-------|-------------------|
-| `route-api` | `/api/*` | `og-api` | None | Http, Https |
-| `route-spa` | `/*` | `og-spa` | None (see note) | Http, Https |
-| `route-app` | `/app/*` | `og-app` | None | Http, Https |
+| Route | Pattern | Origin Group | Forwarding Protocol | Supported Protocols |
+|-------|---------|-------------|--------------------|-----------:|
+| `route-all` | `/*` | `og-appgw` | HttpOnly | Http, Https |
 
-> **Note**: `route-spa` currently has **no cache or compression configured**. It was recreated during AFD Private Link troubleshooting and the cache settings were not reapplied. To restore optimal SPA performance, re-enable caching:
-> ```bash
-> az afd route update -g rg-radshow-stg01-cin --profile-name afd-radshow-stg01 --endpoint-name ep-spa \
->   --route-name route-spa --query-string-caching-behavior IgnoreQueryString \
->   --enable-compression true --content-types-to-compress "text/html" "text/css" \
->   "application/javascript" "application/json" "image/svg+xml"
-> ```
+> **Note**: A single route passes all traffic to AppGW. AppGW handles path-based routing internally: `/api/*` → APIM backend pool, `/*` → Storage SPA backend pool.
+
+### Application Gateway (WAF_v2) — Per Region
+
+Each region has an AppGW with:
+- **HTTPS listener** (port 443) — for direct access (not used by FD)
+- **HTTP listener** (port 80) — used by FD (priority 10 routing rule)
+- **URL path map**: `/api/*` → `bp-apim`, default → `bp-spa`
+- **WAF**: OWASP 3.2, Prevention mode, Host header exclusion (rule 920350)
+- **Custom WAF rule**: `X-Azure-FDID` header must match FD resource_guid
+- **NSG**: AzureFrontDoor.Backend allowed on port 443 (pri 120) AND port 80 (pri 121)
 
 ### Security
 
-- **WAF Policy**: Prevention mode, managed rule sets (Default Rule Set + Bot Protection) with custom rate-limiting rules
-- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — used for `X-Azure-FDID` header validation on App Services (recommended)
+- **FD WAF Policy**: Prevention mode, managed rule sets (Default Rule Set + Bot Protection) with custom rate-limiting rules
+- **AppGW WAF Policy**: OWASP 3.2, Prevention mode, Host header exclusion for FD IP-based Host headers
+- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — validated by AppGW custom WAF rule
 - **Profile Timeout**: 240 seconds
 
 ## Function App Environment Variables
@@ -430,7 +430,7 @@ Key app settings configured on Function Apps (set via Terragrunt/Terraform). The
 
 | Setting | Primary Value (cin) | Secondary Value (sin) |
 |---------|--------------------|-----------------------|
-| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa,og-app` | `og-api,og-spa,og-app` |
+| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-appgw` | `og-appgw` |
 | `FRONT_DOOR_PROFILE_NAME` | `afd-radshow-stg01` | `afd-radshow-stg01` |
 | `PRIMARY_LOCATION` | `centralindia` | `centralindia` |
 | `SECONDARY_LOCATION` | `southindia` | `southindia` |
@@ -443,27 +443,11 @@ Key app settings configured on Function Apps (set via Terragrunt/Terraform). The
 
 | Setting | Primary Value (cin) | Secondary Value (sin) |
 |---------|--------------------|-----------------------|
-| `WEBAPP_HEALTH_URL` | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` | `https://app-radshow-stg01-sin.azurewebsites.net/app/healthz` |
 | `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.happysea-a428f96b.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.mangosea-b9cd4f1e.southindia.azurecontainerapps.io/healthz` |
 
-## App Service Environment Variables
+> **Note**: `WEBAPP_HEALTH_URL` was removed — App Service is no longer part of the architecture.
 
-| Setting | Primary Value (cin) | Secondary Value (sin) |
-|---------|--------------------|-----------------------|
-| `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
-| `ASPNETCORE_PATHBASE` | `/app` | `/app` |
-| `AZURE_REGION` | `centralindia` | `southindia` |
-| `ASPNETCORE_ENVIRONMENT` | `Staging` | `Staging` |
-| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
-| `Redis__ConnectionString` | `redis-radshow-stg01-cin.redis.cache.windows.net:6380,...` | `redis-radshow-stg01-sin.redis.cache.windows.net:6380,...` |
-| `Storage__AccountName` | `stradshowstg01cin` | `stradshowstg01sin` |
-| `Storage__BlobEndpoint` | `https://stradshowstg01cin.blob.core.windows.net/` | `https://stradshowstg01sin.blob.core.windows.net/` |
-| `DOCKER_REGISTRY_SERVER_URL` | `https://acrradshowstg01cin.azurecr.io` | `https://acrradshowstg01cin.azurecr.io` |
-| `WEBSITE_HEALTHCHECK_MAXPINGFAILURES` | `2` | `2` |
-
-> **Note**: The App Service does **not** have a direct SQL connection string as an app setting. It reads data via APIM (`APIM_GATEWAY_URL`) which routes to Container Apps / Function Apps for database operations. Key Vault secrets are read directly via Managed Identity using `KeyVault__VaultUri`.
-
-> **Important**: Each region's App Service and Function App must point to their **local** Key Vault. A prior bug had the sin App Service pointing to the cin KV — this caused incorrect region data to be served.
+> **Important**: Each region's Function App must point to their **local** Key Vault. Both KVs should have the same `active-region` value.
 
 ## Managed Identity Reference (STG01)
 
@@ -473,8 +457,6 @@ System-assigned managed identity principal IDs for all compute resources:
 |----------|--------|--------------|
 | `func-radshow-stg01-cin` | centralindia | `bc01ae81-49a1-4a90-8ef4-12f01a653522` |
 | `func-radshow-stg01-sin` | southindia | `d5b130b7-32b5-48dc-9e9d-441cf502f780` |
-| `app-radshow-stg01-cin` | centralindia | `3835adfa-d2cf-4da8-85f4-096f1c2ed7ff` |
-| `app-radshow-stg01-sin` | southindia | `78497ff2-c6de-4ab4-bc13-5600f7e83451` |
 | `ca-products-radshow-stg01-cin` | centralindia | `46ce9dca-09e5-4b35-9cd1-db5f9084d0af` |
 | `ca-products-radshow-stg01-sin` | southindia | `fa3c960e-64ba-4613-88b4-357414ab8b1b` |
 
@@ -500,11 +482,9 @@ CI/CD Service Principal (OIDC): OID `6952ac03-12b8-4bd2-8697-9b624583b14f`
 | Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
 | Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard (`*`) + apex (`@`) A records pointing to CAE static IP. Check VNet links include all relevant VNets (both primary and secondary). |
 | Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
-| App Service can't reach SQL MI | App Service connects to SQL MI via APIM, not directly. Verify `APIM_GATEWAY_URL` is set. If Container Apps are the backend, ensure private DNS zones resolve. Check that `migrate.yml` granted SQL access to App Service managed identity. |
-| AFD Private Link fails for South India | Azure platform limitation — South India does not support AFD Shared Private Link for any resource type. Cannot mix PL + non-PL origins in the same origin group. |
+| FD returns 502 `OriginCertificateSelfSigned` | AppGW uses self-signed KV certs. FD Premium rejects them even with `enforceCertificateNameCheck=false`. Fix: use `forwarding_protocol = HttpOnly` (port 80). |
 | FD returns 404 after route recreation | FD global propagation takes 10-25 minutes. Check `deploymentStatus` — `NotStarted` means still propagating. Wait and retry. |
-| App Service sin returns wrong region data | Verify `KeyVault__VaultUri` points to local KV (`kv-radshow-{env}-sin`), not primary KV. Check RBAC on sin KV. |
-| Route-spa missing cache/compression | Route was recreated without cache settings during PL troubleshooting. Fix: `az afd route update --route-name route-spa --query-string-caching-behavior IgnoreQueryString --enable-compression true ...` |
+| WAF 403 after enabling Prevention mode | AppGW WAF rule 920350 blocks IP-based Host headers from FD. Add WAF exclusion for `RequestHeaderNames:host`. |
 | Function App can't pull ACR images | Ensure `AcrPull` role assigned to Function App MI on ACR + `container_registry_use_managed_identity = true`. |
 
 ## Terraform Modules (`radshow-def/modules/`)
@@ -512,7 +492,7 @@ CI/CD Service Principal (OIDC): OID `6952ac03-12b8-4bd2-8697-9b624583b14f`
 | Module | Purpose |
 |--------|---------|
 | `apim` | Azure API Management instance + regional gateways |
-| `app-service` | App Service site + plan (Products web UI) |
+| `application-gateway` | Application Gateway WAF_v2 with URL path routing |
 | `automation` | Azure Automation Account + DR runbooks + webhooks |
 | `container-apps` | Container App + Container App Environment (internal CAE) |
 | `container-instances` | Azure Container Instances |

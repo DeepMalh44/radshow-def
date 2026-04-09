@@ -4,14 +4,14 @@
 
 RAD Showcase is a **multi-region, DR-capable web application** hosted on Azure. It consists of:
 
-- **SPA** (Vue 3) — a product catalog UI served from Azure Blob Storage via Azure Front Door
+- **SPA** (Vue 3) — a product catalog UI served from Azure Blob Storage via Azure Front Door + Application Gateway
 - **API** (.NET 8 Function App) — a containerized REST API returning product data from SQL Managed Instance
 - **Products API** (Container App) — a .NET API running in internal Container App Environments, accessed via APIM
-- **Products Web UI** (App Service) — a .NET 8 MVC app at `/app/Products` for product management, served via Front Door `og-app` origin group
-- **APIM** — Azure API Management gateway sitting between Front Door and compute backends (Function App + Container Apps)
+- **APIM** — Azure API Management gateway sitting between Application Gateway and compute backends (Function App + Container Apps)
+- **Application Gateway** (WAF_v2) — per-region gateway handling URL path-based routing (`/api/*` → APIM, `/*` → Storage SPA)
 - **SQL MI** — Azure SQL Managed Instance with automatic Failover Group replication to a secondary region
 
-The SPA calls `/api/products` through Front Door → APIM → Function App → SQL MI. The Products web UI is at `/app/Products` through Front Door → App Service → APIM + SQL MI (FOG). All authentication uses **Entra ID managed identities** (zero passwords).
+The SPA calls `/api/products` through Front Door → AppGW → APIM → Function App → SQL MI. All authentication uses **Entra ID managed identities** (zero passwords).
 
 ---
 
@@ -66,7 +66,7 @@ Step 5: radshow-spa  (Frontend → Blob Storage + CDN purge)
 ### Step 1 — Deploy Infrastructure (`radshow-lic`)
 
 **Pipeline:** `apply.yml` (manual trigger only)  
-**What it deploys:** Resource groups, VNets, SQL MI (primary + secondary), Redis, Key Vault, Storage, Container Registry, App Service Plans, Function Apps, App Services, APIM, Front Door, Private Endpoints, Role Assignments, VNet Peering, Automation Account
+**What it deploys:** Resource groups, VNets, SQL MI (primary + secondary), Redis, Key Vault, Storage, Container Registry, Function Apps, Application Gateways, APIM, Front Door, Private Endpoints, Role Assignments, VNet Peering, Automation Account
 
 ```
 Trigger:  Actions → "Terragrunt Apply" → Run workflow → select environment
@@ -79,7 +79,7 @@ Duration: ~2-4 hours (SQL MI creation is the bottleneck)
 **Pipeline:** `migrate.yml`  
 **What it does:**
 1. Creates the `radshow` database on the primary SQL MI
-2. **Grants SQL access** to all 6 managed identities (func-app primary/secondary, app-service primary/secondary, container-app primary/secondary)
+2. **Grants SQL access** to all 4 managed identities (func-app primary/secondary, container-app primary/secondary)
 3. Creates `__migration_history` tracking table
 4. Runs all pending `V###__*.sql` migration files
 
@@ -164,7 +164,7 @@ This is the **single source of truth** for each environment. Key variables:
 | `enable_dr` | Deploy secondary region resources | `true` |
 | `enable_waf` | Enable WAF on Front Door | `true` |
 | `enable_delete_lock` | Prevent accidental deletion | `false` (true for PRD) |
-| `app_service_sku` | App Service Plan tier | `S1` |
+| `app_service_sku` | ~~Removed~~ | N/A |
 | `sql_mi_vcores` | SQL MI compute | `4` |
 | `sql_mi_storage_gb` | SQL MI storage | `32` |
 
@@ -177,8 +177,8 @@ Contains named values (backend URLs, tenant ID, audience) that get pushed to API
 Each module folder can override `_envcommon` defaults. Common overrides:
 - `sql-mi/terragrunt.hcl` — Entra admin login, object ID, principal type
 - `function-app/terragrunt.hcl` — App settings (SqlConnection, Redis, KeyVault URLs)
-- `app-service/terragrunt.hcl` — Connection strings, app settings
-- `front-door/terragrunt.hcl` — Custom domain, WAF association
+- `application-gateway/terragrunt.hcl` — Backend pools, SSL cert, Front Door ID
+- `front-door/terragrunt.hcl` — AppGW origins, WAF association
 
 ---
 
@@ -207,9 +207,9 @@ Each module folder can override `_envcommon` defaults. Common overrides:
                ▼                       ▼
      ┌─────────────────┐     ┌─────────────────┐
      │ Primary Region   │     │ Secondary Region │
-     │  APIM → Func App │     │  Func App        │
-     │  APIM → Cont.App │     │  Container App   │
-     │  App Service      │     │  App Service     │
+     │  AppGW (WAF_v2)   │     │  AppGW (WAF_v2)  │
+     │  APIM → Func App  │     │  Func App        │
+     │  APIM → Cont.App  │     │  Container App   │
      │  SQL MI (Read/W)  │     │  SQL MI (Read)   │
      │  Redis            │     │  Redis           │
      │  Storage ($web)   │     │  Storage ($web)  │
@@ -225,9 +225,8 @@ Each module folder can override `_envcommon` defaults. Common overrides:
 | Component | Failover Mechanism |
 |---|---|
 | **SQL MI** | Failover Group — switches read-write to secondary |
-| **Front Door** | Origin priority swap — secondary becomes P1 (og-api, og-spa, og-app all swapped) |
+| **Front Door** | Origin priority swap — `og-appgw`: secondary AppGW→P1, primary AppGW→P2 |
 | **Container Apps** | Uses FOG listener endpoint — automatically connects to new primary after SQL MI failover |
-| **App Service** | Uses FOG listener + og-app priority swap — traffic routed to secondary App Service |
 | **Key Vault** | `active-region` secret updated to secondary |
 | **Redis** | Geo-replicated — both regions always active |
 | **Storage** | Both regions have SPA files — FD routes traffic |
@@ -314,7 +313,7 @@ Quick start:
 ### DR Failover Steps (what the runbooks do)
 
 1. **SQL MI FOG failover** — `az sql instance-failover-group set-primary --location {secondary}`
-2. **Front Door origin priority swap** — all 3 origin groups (`og-api`, `og-spa`, `og-app`): secondary→P1, primary→P2
+2. **Front Door origin priority swap** — `og-appgw`: secondary AppGW→P1, primary AppGW→P2
 3. **Key Vault active-region update** — set `active-region` secret to secondary region in both KVs
 4. **Validation** — health probes, CRUD test via Front Door, region verification
 
@@ -322,9 +321,8 @@ Quick start:
 
 1. **Downtime window:** ~2-5 minutes for planned failover (SQL MI FOG sync time, 60-minute grace period)
 2. **SPA:** Continues working — Front Door serves from secondary storage
-3. **API calls:** Brief interruption while SQL MI switches. After switch, APIM/Front Door route to secondary Function App
-4. **App Service:** Front Door routes to secondary App Service after priority swap
-5. **Data:** Zero data loss for planned failover. Potential data loss for unplanned (forced) failover
+3. **API calls:** Brief interruption while SQL MI switches. After switch, APIM/Front Door/AppGW route to secondary Function App
+4. **Data:** Zero data loss for planned failover. Potential data loss for unplanned (forced) failover
 6. **Clients:** No URL changes — Front Door endpoint stays the same
 
 ### SPA Failover Control Panel (In-App UI)
@@ -386,77 +384,68 @@ The SPA only performs **planned (graceful) failover**. It does NOT support `Allo
 | What | URL |
 |---|---|
 | SPA | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/` |
-| Products Web UI | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products` |
-| Products Create Page | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products/Create` |
 | API (via Front Door) | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/products` |
 | API (via APIM direct) | `https://apim-radshow-stg01-cin.azure-api.net/api/products` |
 | Products API (via APIM) | `https://apim-radshow-stg01-cin.azure-api.net/products` |
 | API (Function App direct) | `https://func-radshow-stg01-cin.azurewebsites.net/api/products` |
-| App Service direct | `https://app-radshow-stg01-cin.azurewebsites.net/app/Products` |
 | Health check (API) | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/healthz` |
-| Health check (App Service) | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` |
 | Failover Control | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/failover` |
 | Regional Status | `https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/status` |
 
 Quick test:
 ```bash
-# All 3 Front Door routes
+# Front Door routes (single route via AppGW)
 curl -s -o /dev/null -w "SPA: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/
 curl -s -o /dev/null -w "API: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/api/status
-curl -s -o /dev/null -w "APP: %{http_code}\n" https://ep-spa-c0gffpf4d5fwdkfr.b02.azurefd.net/app/Products
 
-# Direct backend health checks
+# Direct backend health check
 curl -s https://func-radshow-stg01-cin.azurewebsites.net/api/healthz
-curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 ```
 
 ---
 
 ## Front Door Configuration Details
 
-### Origin Groups & Health Probes
+### Origin Group & Health Probe
 
 | Origin Group | Health Probe Path | Method | Protocol | Interval | Sample Size | Required Successful | Traffic Restoration |
 |-------------|-------------------|--------|----------|----------|-------------|--------------------|--------------------|---|
-| `og-api` | `/api/healthz` | GET | HTTPS | 30s | 4 | 2 | 10 min |
-| `og-spa` | `/index.html` | GET | HTTPS | 30s | 4 | 2 | 10 min |
-| `og-app` | `/app/healthz` | GET | HTTPS | 30s | 4 | 3 | 10 min |
+| `og-appgw` | `/` | GET | Http | 30s | 4 | 2 | 10 min |
+
+> **Note**: Front Door uses a single origin group (`og-appgw`) that routes to Application Gateway. The AppGW then handles URL-path-based routing to APIM (`/api/*`) and Storage SPA (`/*`).
 
 ### Origins (STG01)
 
-| Origin Group | Origin | Hostname | Priority |
+| Origin Group | Origin | Hostname (AppGW Public IP) | Priority |
 |-------------|--------|----------|----------|
-| `og-api` | `apim-primary` | `apim-radshow-stg01-cin.azure-api.net` (global) | 1 |
-| `og-api` | `apim-secondary` | `apim-radshow-stg01-cin-southindia-01.regional.azure-api.net` | 2 |
-| `og-spa` | `spa-primary` | `stradshowstg01cin.z29.web.core.windows.net` | 1 |
-| `og-spa` | `spa-secondary` | `stradshowstg01sin.z30.web.core.windows.net` | 2 |
-| `og-app` | `app-primary` | `app-radshow-stg01-cin.azurewebsites.net` | 1 |
-| `og-app` | `app-secondary` | `app-radshow-stg01-sin.azurewebsites.net` | 2 |
-
-> **Note**: All origins connect over public internet (no Private Link). South India does not support AFD Shared Private Link, and Azure forbids mixing PL + non-PL origins in the same origin group.
+| `og-appgw` | `appgw-primary` | `20.235.72.158` (appgw-radshow-stg01-cin) | 1 |
+| `og-appgw` | `appgw-secondary` | `20.219.126.137` (appgw-radshow-stg01-sin) | 2 |
 
 ### Routes
 
-| Route | Pattern | Origin Group | Cache | Compression |
-|-------|---------|-------------|-------|-------------|
-| `route-api` | `/api/*` | `og-api` | None | No |
-| `route-spa` | `/*` | `og-spa` | None (see note) | No |
-| `route-app` | `/app/*` | `og-app` | None | No |
+| Route | Pattern | Origin Group | Forwarding Protocol | Cache | Compression |
+|-------|---------|-------------|---------------------|-------|-------------|
+| `route-all` | `/*` | `og-appgw` | HttpOnly | None | No |
 
-> **Note**: `route-spa` currently has **no cache or compression configured**. It was recreated during AFD Private Link troubleshooting and the cache settings were not reapplied. To restore optimal SPA performance:
-> ```bash
-> az afd route update -g rg-radshow-stg01-cin --profile-name afd-radshow-stg01 --endpoint-name ep-spa \
->   --route-name route-spa --query-string-caching-behavior IgnoreQueryString \
->   --enable-compression true --content-types-to-compress "text/html" "text/css" \
->   "application/javascript" "application/json" "image/svg+xml"
-> ```
+> **Note**: Front Door forwards all traffic to Application Gateway over HTTP (port 80). This avoids `OriginCertificateSelfSigned` errors caused by self-signed KV certificates on AppGW HTTPS listeners. AppGW handles URL-path routing and WAF inspection.
+
+### Application Gateway (per region)
+
+| Component | Primary (cin) | Secondary (sin) |
+|-----------|--------------|------------------|
+| **Name** | `appgw-radshow-stg01-cin` | `appgw-radshow-stg01-sin` |
+| **SKU** | WAF_v2 | WAF_v2 |
+| **Listeners** | HTTP (port 80), HTTPS (port 443) | HTTP (port 80), HTTPS (port 443) |
+| **URL Path Map** | `/api/*` → APIM backend, `/*` → Storage SPA backend | Same |
+| **WAF Mode** | Prevention (OWASP 3.2) | Prevention (OWASP 3.2) |
+| **WAF Exclusion** | Host header, rule 920350 (FD sends IP-based Host headers) | Same |
+| **NSG** | Port 80 from `AzureFrontDoor.Backend` (pri 121) | Same |
 
 ### WAF & Security
 
-- **WAF Policy**: Prevention mode, attached to all endpoints
-- **Managed Rule Sets**: Default Rule Set + Bot Protection
-- **Custom Rules**: Rate-limiting rules
-- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — used for `X-Azure-FDID` header validation on App Services
+- **Front Door WAF**: Prevention mode, Default Rule Set + Bot Protection, rate-limiting custom rules
+- **AppGW WAF**: Prevention mode, OWASP 3.2, Host header exclusion for rule 920350
+- **Front Door ID**: `d6f9998e-db6a-4143-9ba7-71d17c486ece` (STG01) — used for `X-Azure-FDID` header validation
 - **Profile Timeout**: 240 seconds
 
 ---
@@ -470,28 +459,15 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | `AZURE_REGION` | `centralindia` | `southindia` |
 | `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
 | `KeyVault__PeerVaultUri` | `https://kv-radshow-stg01-sin.vault.azure.net/` | `https://kv-radshow-stg01-cin.vault.azure.net/` |
-| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-api,og-spa,og-app` | `og-api,og-spa,og-app` |
+| `FRONT_DOOR_ORIGIN_GROUP_NAME` | `og-appgw` | `og-appgw` |
 | `FRONT_DOOR_PROFILE_NAME` | `afd-radshow-stg01` | `afd-radshow-stg01` |
 | `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
 | `SqlConnection` | FOG listener (`fog-radshow-stg01.fa2e243b64f2.database.windows.net`) | Same FOG listener |
-| `WEBAPP_HEALTH_URL` | `https://app-radshow-stg01-cin.azurewebsites.net/app/healthz` | `https://app-radshow-stg01-sin.azurewebsites.net/app/healthz` |
 | `CONTAINER_APP_HEALTH_URL` | `https://ca-products-radshow-stg01-cin.happysea-a428f96b.centralindia.azurecontainerapps.io/healthz` | `https://ca-products-radshow-stg01-sin.mangosea-b9cd4f1e.southindia.azurecontainerapps.io/healthz` |
 
-### App Service Settings
+> **Note**: `WEBAPP_HEALTH_URL` has been removed — App Service is no longer part of the architecture.
 
-| Setting | Primary (cin) | Secondary (sin) |
-|---------|--------------|------------------|
-| `KeyVault__VaultUri` | `https://kv-radshow-stg01-cin.vault.azure.net/` | `https://kv-radshow-stg01-sin.vault.azure.net/` |
-| `ASPNETCORE_PATHBASE` | `/app` | `/app` |
-| `AZURE_REGION` | `centralindia` | `southindia` |
-| `APIM_GATEWAY_URL` | `https://apim-radshow-stg01-cin.azure-api.net` | `https://apim-radshow-stg01-cin.azure-api.net` |
-| `Redis__ConnectionString` | `redis-radshow-stg01-cin.redis.cache.windows.net:6380,...` | `redis-radshow-stg01-sin.redis.cache.windows.net:6380,...` |
-| `Storage__AccountName` | `stradshowstg01cin` | `stradshowstg01sin` |
-| `DOCKER_REGISTRY_SERVER_URL` | `https://acrradshowstg01cin.azurecr.io` | `https://acrradshowstg01cin.azurecr.io` |
-
-> **Note**: App Service has no direct SQL connection string. It reads data via APIM (`APIM_GATEWAY_URL`) which routes to Container Apps / Function Apps.
-
-> **Critical**: Each region's App Service and Function App must point to their **local** Key Vault. A prior bug had the sin App Service pointing to the cin KV — this caused incorrect region data to be served.
+> **Critical**: Each region's Function App must point to their **local** Key Vault. A prior bug had the sin Function App pointing to the cin KV — this caused incorrect region data to be served.
 
 ---
 
@@ -500,12 +476,13 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | Decision | Rationale |
 |----------|----------|
 | **Docker containers on Function Apps** | CI/CD deploys container images via `az functionapp config container set`, not zip deploy. Terraform ignores `application_stack` drift via `lifecycle.ignore_changes`. |
-| **FOG listener for all compute** | Function App, App Service, and Container Apps all use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
-| **Single Front Door endpoint** | SPA + API + App share one endpoint (`ep-spa`) so relative `/api/*` calls work without CORS. |
+| **FOG listener for all compute** | Function App and Container Apps use the SQL MI Failover Group listener endpoint, not direct SQL MI FQDN. Ensures automatic DR failover. |
+| **Application Gateway (WAF_v2) per region** | AppGW provides URL-path routing (`/api/*` → APIM, `/*` → Storage SPA) and WAF inspection. Front Door routes all traffic to AppGW. |
+| **FD → AppGW HTTP forwarding** | Front Door forwards to AppGW over HTTP (port 80) to avoid `OriginCertificateSelfSigned` errors from self-signed KV certificates on HTTPS listeners. |
+| **Single Front Door origin group & route** | `og-appgw` with `route-all` (`/*`) replaces the previous 3-origin-group setup. AppGW handles path-based routing instead of FD. |
 | **Active-passive FD routing** | Origins use `priority` (1=primary, 2=secondary). Failover swaps priorities. Health probes use GET requests to detect origin availability. |
-| **AFD Private Link not viable** | South India does not support AFD Private Link; Azure forbids mixing PL + non-PL origins in the same origin group. Use App Service access restrictions (`AzureFrontDoor.Backend` service tag + `X-Azure-FDID` header) as alternative. |
-| **Storage public access required** | Storage static website endpoints (`$web`) require `publicNetworkAccess=Enabled` for Front Door. `allowSharedKeyAccess=false` (MI-only auth for management). |
-| **Each region has its own KV** | App Service and Function App in each region point to their local Key Vault. Both KVs have `active-region` secret set to the same value. |
+| **Storage public access required** | Storage static website endpoints (`$web`) require `publicNetworkAccess=Enabled` for AppGW backend. `allowSharedKeyAccess=false` (MI-only auth for management). |
+| **Each region has its own KV** | Function App in each region points to their local Key Vault. Both KVs have `active-region` secret set to the same value. |
 | **3-tier DR resilience** | SPA UI (Tier 1), Azure Automation webhooks (Tier 2), and operator scripts (Tier 3) provide independent failover paths with no single point of failure. |
 | **OIDC (no secrets)** | GitHub Actions authenticate via Workload Identity Federation — no client secrets to rotate. |
 | **APIOps for APIM** | APIM policies/APIs managed as code in `radshow-apim`, published via pipeline (not Terraform). |
@@ -523,11 +500,9 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 | Container-apps apply fails | Known issue — `infrastructure_resource_group_name` forces recreate. Deferred. |
 | Container App DNS resolution fails | If internal CAE, verify private DNS zone exists with wildcard (`*`) + apex (`@`) A records pointing to CAE static IP. Check VNet links include both primary and secondary VNets. |
 | Products page HTTP 500 | Check: (1) APIM `radshow-product-api` has `subscriptionRequired: false`, (2) Container App CAE private DNS zone exists, (3) Container App MI has SQL MI database user (granted by `migrate.yml`). |
-| App Service can't reach SQL MI | App Service connects via APIM, not directly. Verify `APIM_GATEWAY_URL` is set. Ensure Container Apps private DNS zones resolve. Check `migrate.yml` granted SQL access to App Service MI. |
-| AFD Private Link fails (South India) | Platform limitation — South India doesn't support AFD Shared Private Link. Cannot mix PL + non-PL origins in same origin group. |
-| Route-spa missing cache/compression | Route was recreated without cache settings during PL troubleshooting. Fix: `az afd route update --route-name route-spa --query-string-caching-behavior IgnoreQueryString --enable-compression true ...` |
+| `OriginCertificateSelfSigned` on FD | Front Door cannot validate self-signed KV certs on AppGW HTTPS listeners. Fixed by using `HttpOnly` forwarding protocol on FD route — FD connects to AppGW over port 80. |
+| WAF 403 on FD requests | AppGW WAF rule 920350 blocks requests with IP-based Host headers (sent by FD). Fixed by adding Host header exclusion for rule 920350 in AppGW WAF policy. |
 | FD returns 404 after route recreation | FD global propagation takes 10-25 minutes. Check `deploymentStatus` — `NotStarted` means still propagating. Wait and retry. |
-| App Service sin returns wrong region | Verify `KeyVault__VaultUri` points to local KV (`kv-radshow-{env}-sin`), not primary KV. Check RBAC on sin KV. |
 | Function App can't pull ACR images | Ensure `AcrPull` role assigned to Function App MI on ACR + `container_registry_use_managed_identity = true`. |
 
 ---
@@ -538,14 +513,13 @@ curl -s https://app-radshow-stg01-cin.azurewebsites.net/app/healthz
 GitHub Actions  ──OIDC──►  Azure AD (sp-radshow-cicd)  ──RBAC──►  Azure Resources
                                                                          │
 Function App  ──System MI──►  SQL MI (Entra-only auth)                   │
-App Service   ──System MI──►  Key Vault (RBAC)                          │
 Container App ──System MI──►  SQL MI (FOG listener)                     │
                               Redis                                      │
                               Storage                                    │
 ```
 
 - **No passwords anywhere.** GitHub → Azure uses OIDC federation. Apps → backends use system-assigned managed identities.
-- SQL MI is **Entra-only** (SQL auth disabled). The CI/CD SP (`sp-radshow-cicd`) is the SQL admin and grants access to app managed identities (Function App, App Service, Container App) during the `radshow-db` migration pipeline.
+- SQL MI is **Entra-only** (SQL auth disabled). The CI/CD SP (`sp-radshow-cicd`) is the SQL admin and grants access to app managed identities (Function App, Container App) during the `radshow-db` migration pipeline.
 
 ---
 
