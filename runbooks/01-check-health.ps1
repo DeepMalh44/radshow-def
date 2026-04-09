@@ -215,33 +215,7 @@ foreach ($pair in @(
 
 Write-Host ""
 
-# ── 7. App Services (Web App) ──────────────────────────────────────────
-Write-Host "[CHECK] App Services (Web App)" -ForegroundColor Yellow
-foreach ($pair in @(
-    @{ Name = $Config.AppServicePrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }
-    @{ Name = $Config.AppServiceSecondaryName; RG = $Config.SecondaryResourceGroup; Label = "Secondary" }
-)) {
-    try {
-        $app = Get-AzWebApp -ResourceGroupName $pair.RG -Name $pair.Name -ErrorAction Stop
-        $running = $app.State -eq "Running"
-        $results += @{
-            Component = "AppService ($($pair.Label))"
-            Status    = if ($running) { "Healthy" } else { "Warning" }
-            Detail    = "State=$($app.State), URL=$($pair.Name).azurewebsites.net"
-            Critical  = $false
-        }
-        $color = if ($running) { "Green" } else { "Yellow" }
-        Write-Host "  $($pair.Name): $($app.State)" -ForegroundColor $color
-    }
-    catch {
-        $results += @{ Component = "AppService ($($pair.Label))"; Status = "Error"; Detail = $_.Exception.Message; Critical = $false }
-        Write-Host "  $($pair.Name): [ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    }
-}
-
-Write-Host ""
-
-# ── 8. Container Apps ──────────────────────────────────────────────────
+# ── 7. Container Apps ──────────────────────────────────────────────────
 Write-Host "[CHECK] Container Apps" -ForegroundColor Yellow
 foreach ($pair in @(
     @{ Name = $Config.ContainerAppPrimaryName; RG = $Config.PrimaryResourceGroup; Label = "Primary" }

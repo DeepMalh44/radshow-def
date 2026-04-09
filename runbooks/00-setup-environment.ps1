@@ -93,10 +93,6 @@ $global:DrConfig = @{
     FuncAppPrimaryName     = "func-$ProjectName-$Environment-$pri"
     FuncAppSecondaryName   = "func-$ProjectName-$Environment-$sec"
 
-    # App Services (web app)
-    AppServicePrimaryName  = "app-$ProjectName-$Environment-$pri"
-    AppServiceSecondaryName = "app-$ProjectName-$Environment-$sec"
-
     # Container Apps
     ContainerAppPrimaryName  = "ca-products-$ProjectName-$Environment-$pri"
     ContainerAppSecondaryName = "ca-products-$ProjectName-$Environment-$sec"

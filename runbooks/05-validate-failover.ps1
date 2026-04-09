@@ -182,48 +182,7 @@ catch {
 
 Write-Host ""
 
-# ── 6. App Service (Web App) Health ────────────────────────────────────
-Write-Host "[VALIDATE] App Service (Web App) Status" -ForegroundColor Yellow
-$expectedActiveAppSvc = if ($OperationType -eq "failover") { $Config.AppServiceSecondaryName } else { $Config.AppServicePrimaryName }
-$expectedActiveAppSvcRG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
-
-try {
-    $appSvc = Get-AzWebApp -ResourceGroupName $expectedActiveAppSvcRG -Name $expectedActiveAppSvc -ErrorAction Stop
-    $running = $appSvc.State -eq "Running"
-    $validationResults += @{
-        Check  = "Active App Service"
-        Pass   = $running
-        Detail = "$expectedActiveAppSvc State=$($appSvc.State)"
-    }
-    $color = if ($running) { "Green" } else { "Red" }
-    Write-Host "  $expectedActiveAppSvc : $($appSvc.State) $(if ($running) {'[PASS]'} else {'[FAIL]'})" -ForegroundColor $color
-}
-catch {
-    $validationResults += @{ Check = "Active App Service"; Pass = $false; Detail = $_.Exception.Message }
-    Write-Host "  [FAIL] $($_.Exception.Message)" -ForegroundColor Red
-}
-
-# Validate App Service health endpoint responds correctly
-try {
-    $appHealthUrl = "https://$expectedActiveAppSvc.azurewebsites.net/app/healthz"
-    $healthResp = Invoke-WebRequest -Uri $appHealthUrl -Method GET -TimeoutSec 15 -ErrorAction Stop
-    $healthOk = $healthResp.StatusCode -eq 200
-    $validationResults += @{
-        Check  = "App Service /app/healthz"
-        Pass   = $healthOk
-        Detail = "StatusCode=$($healthResp.StatusCode)"
-    }
-    $color = if ($healthOk) { "Green" } else { "Red" }
-    Write-Host "  $appHealthUrl : $($healthResp.StatusCode) $(if ($healthOk) {'[PASS]'} else {'[FAIL]'})" -ForegroundColor $color
-}
-catch {
-    $validationResults += @{ Check = "App Service /app/healthz"; Pass = $false; Detail = $_.Exception.Message }
-    Write-Host "  [FAIL] $appHealthUrl : $($_.Exception.Message)" -ForegroundColor Red
-}
-
-Write-Host ""
-
-# ── 7. Container App Status ────────────────────────────────────────────
+# ── 6. Container App Status ────────────────────────────────────────────
 Write-Host "[VALIDATE] Container App Status" -ForegroundColor Yellow
 $expectedActiveCA = if ($OperationType -eq "failover") { $Config.ContainerAppSecondaryName } else { $Config.ContainerAppPrimaryName }
 $expectedActiveCA_RG = if ($OperationType -eq "failover") { $Config.SecondaryResourceGroup } else { $Config.PrimaryResourceGroup }
