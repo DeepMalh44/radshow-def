@@ -134,9 +134,9 @@ if ($SoakMinutes -gt 0 -and -not $DryRun) {
         $remaining = [math]::Round(($soakEnd - (Get-Date)).TotalSeconds)
         Write-Host "  [Soak iteration $iteration] ${remaining}s remaining..." -ForegroundColor Gray
 
-        # Quick health probe via Front Door
+        # Quick health probe via Front Door (AppGW → APIM → func app)
         try {
-            $resp = Invoke-WebRequest -Uri "$($global:DrConfig.FrontDoorEndpoint)/health" -Method GET -TimeoutSec 10 -ErrorAction SilentlyContinue
+            $resp = Invoke-WebRequest -Uri "$($global:DrConfig.FrontDoorEndpoint)/api/healthz" -Method GET -TimeoutSec 10 -ErrorAction SilentlyContinue
             Write-Host "  Health probe: $($resp.StatusCode)" -ForegroundColor $(if ($resp.StatusCode -eq 200) { "Green" } else { "Yellow" })
         }
         catch {
