@@ -181,6 +181,22 @@ resource "azurerm_network_security_rule" "appgw_frontdoor_443" {
   network_security_group_name = azurerm_network_security_group.this[each.key].name
 }
 
+resource "azurerm_network_security_rule" "appgw_frontdoor_80" {
+  for_each = local.appgw_subnets
+
+  name                        = "Allow_FrontDoor_HTTP_80"
+  priority                    = 121
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "80"
+  source_address_prefix       = "AzureFrontDoor.Backend"
+  destination_address_prefix  = "*"
+  resource_group_name         = var.resource_group_name
+  network_security_group_name = azurerm_network_security_group.this[each.key].name
+}
+
 resource "azurerm_network_security_rule" "appgw_deny_internet" {
   for_each = local.appgw_subnets
 

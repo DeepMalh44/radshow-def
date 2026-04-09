@@ -78,6 +78,14 @@ resource "azurerm_web_application_firewall_policy" "this" {
       type    = "OWASP"
       version = "3.2"
     }
+
+    # Exclude Host header from WAF inspection — FD sends IP-based Host
+    # headers when forwarding to AppGW IP origins, triggering rule 920350
+    exclusion {
+      match_variable          = "RequestHeaderNames"
+      selector                = "host"
+      selector_match_operator = "Equals"
+    }
   }
 }
 
@@ -85,18 +93,21 @@ resource "azurerm_web_application_firewall_policy" "this" {
 # Application Gateway
 #--------------------------------------------------------------
 locals {
-  frontend_ip_name    = "feip-public"
-  frontend_port_name  = "feport-https"
-  listener_name       = "listener-https"
-  ssl_cert_name       = "appgw-ssl"
-  url_path_map_name   = "upm-routing"
-  bp_apim_name        = "bp-apim"
-  bp_spa_name         = "bp-spa"
-  bhs_apim_name       = "bhs-apim"
-  bhs_spa_name        = "bhs-spa"
-  probe_apim_name     = "probe-apim"
-  probe_spa_name      = "probe-spa"
-  routing_rule_name   = "rule-path-routing"
+  frontend_ip_name         = "feip-public"
+  frontend_port_https_name = "feport-https"
+  frontend_port_http_name  = "feport-http"
+  listener_https_name      = "listener-https"
+  listener_http_name       = "listener-http"
+  ssl_cert_name            = "appgw-ssl"
+  url_path_map_name        = "upm-routing"
+  bp_apim_name             = "bp-apim"
+  bp_spa_name              = "bp-spa"
+  bhs_apim_name            = "bhs-apim"
+  bhs_spa_name             = "bhs-spa"
+  probe_apim_name          = "probe-apim"
+  probe_spa_name           = "probe-spa"
+  routing_rule_https_name  = "rule-path-routing"
+  routing_rule_http_name   = "rule-http-path-routing"
 }
 
 resource "azurerm_application_gateway" "this" {
@@ -133,8 +144,13 @@ resource "azurerm_application_gateway" "this" {
   }
 
   frontend_port {
-    name = local.frontend_port_name
+    name = local.frontend_port_https_name
     port = 443
+  }
+
+  frontend_port {
+    name = local.frontend_port_http_name
+    port = 80
   }
 
   #--- SSL Certificate from Key Vault ---
@@ -145,11 +161,19 @@ resource "azurerm_application_gateway" "this" {
 
   #--- HTTPS Listener ---
   http_listener {
-    name                           = local.listener_name
+    name                           = local.listener_https_name
     frontend_ip_configuration_name = local.frontend_ip_name
-    frontend_port_name             = local.frontend_port_name
+    frontend_port_name             = local.frontend_port_https_name
     protocol                       = "Https"
     ssl_certificate_name           = local.ssl_cert_name
+  }
+
+  #--- HTTP Listener (for Front Door → AppGW forwarding over HTTP) ---
+  http_listener {
+    name                           = local.listener_http_name
+    frontend_ip_configuration_name = local.frontend_ip_name
+    frontend_port_name             = local.frontend_port_http_name
+    protocol                       = "Http"
   }
 
   #--- Backend Address Pools ---
@@ -219,12 +243,20 @@ resource "azurerm_application_gateway" "this" {
     }
   }
 
-  #--- Request Routing Rule ---
+  #--- Request Routing Rules ---
   request_routing_rule {
-    name               = local.routing_rule_name
+    name               = local.routing_rule_https_name
     priority           = 1
     rule_type          = "PathBasedRouting"
-    http_listener_name = local.listener_name
+    http_listener_name = local.listener_https_name
+    url_path_map_name  = local.url_path_map_name
+  }
+
+  request_routing_rule {
+    name               = local.routing_rule_http_name
+    priority           = 10
+    rule_type          = "PathBasedRouting"
+    http_listener_name = local.listener_http_name
     url_path_map_name  = local.url_path_map_name
   }
 
