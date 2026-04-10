@@ -185,12 +185,43 @@ terragrunt apply --all --non-interactive \
 
 ### Step 6: Deploy Applications (CI/CD Pipelines)
 
-Push to `main` branch in this order:
+All application pipelines trigger on **push to `main`**. After a fresh fork/clone with no code changes, follow these steps:
 
-1. **radshow-api** — Builds Docker image → ACR → deploys to both Function Apps
-2. **radshow-db** — Runs EF Core migrations against SQL MI, grants managed identity access to Function App, App Service, AND Container App identities
-3. **radshow-spa** — Builds Vue app → uploads to both Storage `$web` containers → purges Front Door cache
-4. **radshow-apim** — Publishes API definitions, policies, and named values to APIM
+#### 6a. Enable GitHub Actions on Forked Repos
+
+> **Important**: GitHub **disables Actions by default on forked repos** for security. You must enable them manually.
+
+For each of the 4 app repos (`radshow-db`, `radshow-api`, `radshow-apim`, `radshow-spa`):
+1. Go to the repo on GitHub → **Actions** tab
+2. Click **"I understand my workflows, go ahead and enable them"**
+
+Skipping this step will silently prevent all pipelines from running.
+
+#### 6b. Trigger the Pipelines
+
+Since no code has changed yet, you need to trigger each pipeline by making a small commit:
+
+```bash
+# For each app repo, in order:
+cd radshow-db
+echo "" >> README.md   # or add a comment to any file
+git add . && git commit -m "chore: trigger initial deployment" && git push origin main
+
+# Wait for radshow-db pipeline to complete before proceeding
+```
+
+> **Tip**: Any commit to `main` works — adding a blank line to README, updating a comment, etc. The content of the change does not matter; the push event is the trigger.
+
+#### 6c. Deployment Order (must follow this sequence)
+
+| Order | Repo | Workflow | What It Does | Wait Before Next? |
+|-------|------|----------|-------------|-------------------|
+| 1 | **radshow-db** | `migrate.yml` | Schema migrations + grants SQL MI access to all managed identities | **Yes** — API needs DB schema |
+| 2 | **radshow-api** | `deploy.yml` | Docker build → ACR → deploys to both Function Apps + Container Apps | **Yes** — APIM needs backends running |
+| 3 | **radshow-apim** | `publisher.yml` | Publishes API definitions, policies, and named values to APIM | **Yes** — SPA calls APIs via APIM |
+| 4 | **radshow-spa** | `deploy.yml` | Vue build → both Storage `$web` containers → purges Front Door cache | No |
+
+> **Note**: If a pipeline fails, fix the issue and re-push to `main` (another trivial commit) to re-trigger it. There is no manual "Run workflow" button unless `workflow_dispatch` is added to the workflow files.
 
 ### Step 7: Post-Deployment Manual Steps
 
@@ -399,18 +430,19 @@ Phase 3 — Post-Infra Secrets
   7. Set SQL_MI_FQDN + SQL_DATABASE_NAME on radshow-db (from terragrunt output)
   8. Set CONTAINER_APP_NAME + CONTAINER_APP_SECONDARY_NAME on radshow-api and radshow-db
 
-Phase 4 — Application Deployment (push to main or workflow_dispatch)
-  9.  radshow-db   → migrate.yml  (schema + SQL user grants for all managed identities)
-  10. radshow-api  → deploy.yml   (Docker build → ACR → func apps + container apps)
-  11. radshow-apim → publisher.yml (API definitions + policies to APIM)
-  12. radshow-spa  → deploy.yml   (Vue build → both storage $web → purge FD cache)
+Phase 4 — Application Deployment (see Step 6 for detailed instructions)
+  9.  Enable GitHub Actions on all 4 forked app repos (Actions tab → enable)
+  10. radshow-db   → migrate.yml  (trigger: commit + push to main)
+  11. radshow-api  → deploy.yml   (trigger: commit + push to main, after db completes)
+  12. radshow-apim → publisher.yml (trigger: commit + push to main, after api completes)
+  13. radshow-spa  → deploy.yml   (trigger: commit + push to main, after apim completes)
 
 Phase 5 — Post-Deploy Manual Steps
-  13. Seed Key Vault secrets: active-region + failover-password (both KVs)
-  14. Verify Container App private DNS zones (wildcard + apex A records, VNet links)
-  15. Verify NSG rules: port 80 from AzureFrontDoor.Backend on AppGW subnets
-  16. Verify FRONT_DOOR_ORIGIN_GROUP_NAME=og-appgw on both func apps
-  17. Run verification: curl all FD routes (/, /api/status, /api/products, /api/healthz)
+  14. Seed Key Vault secrets: active-region + failover-password (both KVs)
+  15. Verify Container App private DNS zones (wildcard + apex A records, VNet links)
+  16. Verify NSG rules: port 80 from AzureFrontDoor.Backend on AppGW subnets
+  17. Verify FRONT_DOOR_ORIGIN_GROUP_NAME=og-appgw on both func apps
+  18. Run verification: curl all FD routes (/, /api/status, /api/products, /api/healthz)
 ```
 
 ### Pipeline Flow Per Repo
