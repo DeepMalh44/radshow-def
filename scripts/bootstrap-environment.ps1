@@ -60,6 +60,7 @@
 ║     - Entra admin group Object ID (for SQL MI)                             ║
 ║     - TF state storage account name                                        ║
 ║     - DR failover password (entered securely)                              ║
+║     - Zone redundancy per region (primary/secondary independently)         ║
 ║     - Runner VM size and subnet CIDR (SelfHosted mode only)                ║
 ║                                                                            ║
 ║   SAFE TO RE-RUN: All phases are idempotent — they check if work is        ║
@@ -310,6 +311,28 @@ function Get-BootstrapConfig {
     Write-Host "--- DR Automation ---" -ForegroundColor Cyan
     $drPassword = Read-Parameter -Prompt "DR failover password (for Key Vault)" -Required -IsSecure
 
+    # --- Zone Redundancy (per region) ---
+    Write-Host ""
+    Write-Host "--- Availability Zone Redundancy ---" -ForegroundColor Cyan
+    Write-Host "  Not all Azure regions support availability zones." -ForegroundColor DarkGray
+    Write-Host "  You can enable zone redundancy independently for each region." -ForegroundColor DarkGray
+    Write-Host "  This affects: Function App, App Service, Container Apps, SQL MI, Redis, ACR, APIM." -ForegroundColor DarkGray
+    Write-Host ""
+    $zoneRedundantPrimary = Read-Parameter -Prompt "Enable zone redundancy for PRIMARY region ($primaryLocation)?  (Y/n)" -Default "n"
+    $enableZonePrimary = ($zoneRedundantPrimary -eq 'Y' -or $zoneRedundantPrimary -eq 'y')
+    $zoneRedundantSecondary = Read-Parameter -Prompt "Enable zone redundancy for SECONDARY region ($secondaryLocation)? (Y/n)" -Default "n"
+    $enableZoneSecondary = ($zoneRedundantSecondary -eq 'Y' -or $zoneRedundantSecondary -eq 'y')
+    if ($enableZonePrimary) {
+        Write-Info "  Primary ($primaryLocation): MULTI-ZONE (zones 1, 2, 3)"
+    } else {
+        Write-Info "  Primary ($primaryLocation): SINGLE-ZONE"
+    }
+    if ($enableZoneSecondary) {
+        Write-Info "  Secondary ($secondaryLocation): MULTI-ZONE (zones 1, 2, 3)"
+    } else {
+        Write-Info "  Secondary ($secondaryLocation): SINGLE-ZONE"
+    }
+
     # --- Self-Hosted Runner Config (only if RunnerMode is SelfHosted) ---
     $runnerVmSize = ''
     $runnerSubnetCidr = ''
@@ -377,6 +400,10 @@ function Get-BootstrapConfig {
         # Derived — OIDC
         SpDisplayName          = "sp-radshow-cicd-$envLower"
 
+        # Zone redundancy (per region)
+        ZoneRedundantPrimary   = $enableZonePrimary
+        ZoneRedundantSecondary = $enableZoneSecondary
+
         # Runner mode
         RunnerMode             = $RunnerMode
 
@@ -404,8 +431,8 @@ function Get-BootstrapConfig {
     Write-Host "  Environment: $($config.Environment)" -ForegroundColor White
     Write-Host "  Subscription: $($config.SubscriptionId)" -ForegroundColor White
     Write-Host "  Tenant: $($config.TenantId)" -ForegroundColor White
-    Write-Host "  Primary: $($config.PrimaryLocation) ($($config.PrimaryShort))" -ForegroundColor White
-    Write-Host "  Secondary: $($config.SecondaryLocation) ($($config.SecondaryShort))" -ForegroundColor White
+    Write-Host "  Primary: $($config.PrimaryLocation) ($($config.PrimaryShort)) — $(if ($config.ZoneRedundantPrimary) { 'MULTI-ZONE' } else { 'SINGLE-ZONE' })" -ForegroundColor White
+    Write-Host "  Secondary: $($config.SecondaryLocation) ($($config.SecondaryShort)) — $(if ($config.ZoneRedundantSecondary) { 'MULTI-ZONE' } else { 'SINGLE-ZONE' })" -ForegroundColor White
     Write-Host "  Repos path: $($config.ReposBasePath)" -ForegroundColor White
     Write-Host ""
     Write-Host "  Resource groups: $($config.ResourceGroupPrimary), $($config.ResourceGroupSecondary)" -ForegroundColor DarkGray
@@ -634,6 +661,86 @@ function Invoke-ConfigurePhase {
             Set-Content -Path $sqlMiHclPath -Value $content -NoNewline
         }
         Write-Success "Updated SQL MI admin OID"
+    }
+
+    # --- Set zone redundancy flags on per-region Terragrunt configs ---
+    if (-not $DryRun) {
+        Write-Step "Setting zone redundancy flags in Terragrunt configs..."
+
+        # Map of module folder suffix -> zone variable name -> zone value format
+        # 'bool' modules use zone_redundant = true/false
+        # 'list' modules use zones = ["1","2","3"] or []
+        $zoneModules = @(
+            @{ Folder = 'function-app';         Var = 'zone_redundant';          Type = 'bool' }
+            @{ Folder = 'function-app-secondary'; Var = 'zone_redundant';        Type = 'bool' }
+            @{ Folder = 'app-service';           Var = 'zone_redundant';          Type = 'bool' }
+            @{ Folder = 'app-service-secondary'; Var = 'zone_redundant';          Type = 'bool' }
+            @{ Folder = 'container-apps';        Var = 'zone_redundancy_enabled'; Type = 'bool' }
+            @{ Folder = 'container-apps-secondary'; Var = 'zone_redundancy_enabled'; Type = 'bool' }
+            @{ Folder = 'sql-mi';                Var = 'zone_redundant';          Type = 'bool' }
+            @{ Folder = 'sql-mi-secondary';      Var = 'zone_redundant';          Type = 'bool' }
+            @{ Folder = 'redis';                 Var = 'zones';                   Type = 'list' }
+            @{ Folder = 'redis-secondary';        Var = 'zones';                  Type = 'list' }
+            @{ Folder = 'container-registry';     Var = 'zone_redundancy_enabled'; Type = 'bool' }
+        )
+
+        foreach ($mod in $zoneModules) {
+            $isPrimary = $mod.Folder -notmatch '-secondary$'
+            $zoneEnabled = if ($isPrimary) { $Config.ZoneRedundantPrimary } else { $Config.ZoneRedundantSecondary }
+
+            # Container Registry is single (primary) but zone setting applies to primary region
+            if ($mod.Folder -eq 'container-registry') { $zoneEnabled = $Config.ZoneRedundantPrimary }
+
+            $hclPath = Join-Path $licPath $Config.Environment $mod.Folder "terragrunt.hcl"
+            if (-not (Test-Path $hclPath)) {
+                # Try _envcommon path
+                $hclPath = Join-Path $licPath "_envcommon" "$($mod.Folder).hcl"
+            }
+            if (Test-Path $hclPath) {
+                $content = Get-Content $hclPath -Raw
+                $varName = $mod.Var
+
+                if ($mod.Type -eq 'bool') {
+                    $newVal = if ($zoneEnabled) { 'true' } else { 'false' }
+                    if ($content -match "($varName\s*=\s*)(true|false)") {
+                        $content = $content -replace "($varName\s*=\s*)(true|false)", "`${1}$newVal"
+                        Set-Content -Path $hclPath -Value $content -NoNewline
+                        Write-Info "  $($mod.Folder): $varName = $newVal"
+                    }
+                    else {
+                        Write-Info "  $($mod.Folder): $varName not found in config (will use module default)"
+                    }
+                }
+                elseif ($mod.Type -eq 'list') {
+                    $newVal = if ($zoneEnabled) { '["1", "2", "3"]' } else { '[]' }
+                    if ($content -match "($varName\s*=\s*)(\[[^\]]*\])") {
+                        $content = $content -replace "($varName\s*=\s*)(\[[^\]]*\])", "`${1}$newVal"
+                        Set-Content -Path $hclPath -Value $content -NoNewline
+                        Write-Info "  $($mod.Folder): $varName = $newVal"
+                    }
+                    else {
+                        Write-Info "  $($mod.Folder): $varName not found in config (will use module default)"
+                    }
+                }
+            }
+        }
+
+        # APIM zones — primary is in main config, secondary in additional_locations
+        $apimEnvCommon = Join-Path $licPath "_envcommon" "apim.hcl"
+        $apimEnvHcl = Join-Path $licPath $Config.Environment "apim" "terragrunt.hcl"
+        $apimHclPath = if (Test-Path $apimEnvHcl) { $apimEnvHcl } elseif (Test-Path $apimEnvCommon) { $apimEnvCommon } else { $null }
+        if ($apimHclPath) {
+            $content = Get-Content $apimHclPath -Raw
+            $primaryZones = if ($Config.ZoneRedundantPrimary) { '["1", "2", "3"]' } else { '[]' }
+            if ($content -match '(zones\s*=\s*)(\[[^\]]*\])') {
+                # Replace first occurrence (primary zones)
+                $content = $content -replace '(zones\s*=\s*)(\[[^\]]*\])', "`${1}$primaryZones", 1
+                Set-Content -Path $apimHclPath -Value $content -NoNewline
+                Write-Info "  apim: zones = $primaryZones"
+            }
+        }
+
+        Write-Success "Zone redundancy flags updated"
     }
 
     # --- Update module source URLs in _envcommon ---

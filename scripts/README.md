@@ -89,7 +89,7 @@ Shows what would be created/configured without actually doing it.
 |---|-------|-------------|----------|
 | 1 | **Prereqs** | Validates all tools are installed and you're logged in | ~10 sec |
 | 2 | **ForkClone** | Forks 6 repos to your GitHub org, clones them locally | ~2 min |
-| 3 | **Configure** | Updates `env.hcl`, module sources, APIM config with your values | ~30 sec |
+| 3 | **Configure** | Updates `env.hcl`, module sources, APIM config, zone redundancy flags | ~30 sec |
 | 4 | **TFState** | Creates resource group + storage account for Terraform state | ~1 min |
 | 5a | **OIDC** *(GitHubHosted)* | Creates App Registration, Service Principal, 5 federated creds, 3 RBAC roles | ~2 min |
 | 5b | **RunnerInfra** *(SelfHosted)* | Creates VMSS runners, NSG, NAT Gateway, MI, RBAC, installs runner agent | ~10 min |
@@ -112,6 +112,7 @@ The script interactively asks for these values (with sensible defaults where pos
 - **Entra admin group Object ID** — for SQL MI AAD admin
 - **TF state storage account name**
 - **DR failover password** — entered securely (masked)
+- **Zone redundancy per region** — independently for primary and secondary (not all regions support AZs)
 - **Runner VM size**, **subnet CIDR**, **instance count** — SelfHosted mode only
 
 ## Runner Modes Explained
@@ -137,6 +138,35 @@ VMSS Runner (in your VNet) --Managed Identity--> Azure resources directly
 - All traffic stays within your network
 - No OIDC credentials needed — MI handles authentication
 - Better for enterprise environments with network restrictions
+
+## Zone Redundancy
+
+The script asks **per-region** whether to enable availability zone redundancy:
+
+```
+--- Availability Zone Redundancy ---
+Not all Azure regions support availability zones.
+You can enable zone redundancy independently for each region.
+
+Enable zone redundancy for PRIMARY region (southcentralus)?  (Y/n): Y
+Enable zone redundancy for SECONDARY region (northcentralus)? (Y/n): n
+  Primary (southcentralus): MULTI-ZONE (zones 1, 2, 3)
+  Secondary (northcentralus): SINGLE-ZONE
+```
+
+This sets the appropriate flags on each resource's Terragrunt config:
+
+| Resource | Variable | Multi-zone value | Single-zone value |
+|----------|----------|-----------------|------------------|
+| Function App | `zone_redundant` | `true` | `false` |
+| App Service | `zone_redundant` | `true` | `false` |
+| Container Apps | `zone_redundancy_enabled` | `true` | `false` |
+| SQL MI | `zone_redundant` | `true` | `false` |
+| Redis | `zones` | `["1","2","3"]` | `[]` |
+| ACR | `zone_redundancy_enabled` | `true` | `false` |
+| APIM | `zones` | `["1","2","3"]` | `[]` |
+
+Primary and secondary regions are configured **independently** — perfect for cases like `southcentralus` (supports AZs) paired with `northcentralus` (no AZ support).
 
 ## Resumability
 
