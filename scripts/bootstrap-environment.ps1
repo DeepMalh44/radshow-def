@@ -1636,16 +1636,16 @@ function Invoke-InfraPhase {
             # Set TF_INPUT=false as additional safeguard for non-interactive mode
             $env:TF_INPUT = "false"
 
-            # Run terragrunt directly — no pipes, which would break --non-interactive
-            # and swallow $LASTEXITCODE. Output goes to console + transcript.
-            & terragrunt run-all apply --non-interactive --terragrunt-non-interactive
+            # --terragrunt-non-interactive: skip terragrunt prompts
+            # -auto-approve: skip terraform prompts (NOT --non-interactive, which terraform rejects)
+            & terragrunt run-all apply -auto-approve --terragrunt-non-interactive
             $tgExit = $LASTEXITCODE
             if ($tgExit -ne 0) {
                 Write-Err "terragrunt apply failed with exit code $tgExit"
                 Write-Info "Check the output above for details."
                 Write-Info "You can also run manually:"
                 Write-Info "  cd '$licEnvPath'"
-                Write-Info "  terragrunt run-all apply --non-interactive"
+                Write-Info "  terragrunt run-all apply -auto-approve --terragrunt-non-interactive"
                 throw "terragrunt apply failed with exit code $tgExit"
             }
         }
