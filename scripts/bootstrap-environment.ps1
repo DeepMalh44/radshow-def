@@ -1600,14 +1600,20 @@ function Invoke-InfraPhase {
                 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             Write-Info "Cleared terragrunt cache"
 
-            & terragrunt run-all apply --non-interactive
-            if ($LASTEXITCODE -ne 0) {
-                Write-Err "terragrunt apply failed with exit code $LASTEXITCODE"
-                Write-Info "Check the output above for details."
+            $tgLogFile = Join-Path $licEnvPath "terragrunt-apply.log"
+            Write-Info "Terragrunt output logged to: $tgLogFile"
+            & terragrunt run-all apply --non-interactive 2>&1 | Tee-Object -FilePath $tgLogFile -Append
+            $tgExit = $LASTEXITCODE
+            if ($tgExit -ne 0) {
+                Write-Err "terragrunt apply failed with exit code $tgExit"
+                Write-Info "Full log: $tgLogFile"
+                # Show last 20 error lines for quick diagnosis
+                Write-Info "Last errors:"
+                Get-Content $tgLogFile | Select-String "ERROR|Error" | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
                 Write-Info "You can also run manually:"
                 Write-Info "  cd '$licEnvPath'"
                 Write-Info "  terragrunt run-all apply --non-interactive"
-                throw "terragrunt apply failed with exit code $LASTEXITCODE"
+                throw "terragrunt apply failed with exit code $tgExit"
             }
         }
         catch {
