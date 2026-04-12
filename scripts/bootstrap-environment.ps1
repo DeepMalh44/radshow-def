@@ -252,7 +252,68 @@ function Test-AzResourceExists {
 #region Parameter Collection
 # ============================================================================
 
+$script:ConfigFilePath = Join-Path $PSScriptRoot '.bootstrap-config.json'
+
+function Save-BootstrapConfig {
+    param([hashtable]$Config)
+    # Clone config and exclude secrets before saving
+    $saveable = @{}
+    foreach ($key in $Config.Keys) {
+        if ($key -eq 'DRPassword') { continue }
+        $saveable[$key] = $Config[$key]
+    }
+    $saveable | ConvertTo-Json -Depth 3 | Set-Content -Path $script:ConfigFilePath -Encoding utf8
+    Write-Info "Config saved to $($script:ConfigFilePath)"
+    Write-Info "  (DRPassword is NOT saved — you'll be re-prompted for it)"
+}
+
+function Load-BootstrapConfig {
+    if (-not (Test-Path $script:ConfigFilePath)) { return $null }
+    try {
+        $json = Get-Content $script:ConfigFilePath -Raw | ConvertFrom-Json
+        $config = @{}
+        foreach ($prop in $json.PSObject.Properties) {
+            $config[$prop.Name] = $prop.Value
+        }
+        # Convert boolean strings back (ConvertFrom-Json may handle this already)
+        foreach ($key in @('ZoneRedundantPrimary', 'ZoneRedundantSecondary')) {
+            if ($config.ContainsKey($key)) { $config[$key] = [bool]$config[$key] }
+        }
+        if ($config.ContainsKey('RunnerCount')) { $config['RunnerCount'] = [int]$config['RunnerCount'] }
+        return $config
+    }
+    catch {
+        Write-Warn "Failed to load cached config: $($_.Exception.Message)"
+        return $null
+    }
+}
+
 function Get-BootstrapConfig {
+    # Check for cached config from a previous run
+    $cached = Load-BootstrapConfig
+    if ($cached) {
+        Write-Host ""
+        Write-Host ("=" * 80) -ForegroundColor Green
+        Write-Host "  Found saved configuration from previous run" -ForegroundColor Green
+        Write-Host ("=" * 80) -ForegroundColor Green
+        Write-Host ""
+        Write-Host "  Environment: $($cached.Environment)" -ForegroundColor White
+        Write-Host "  GitHub: $($cached.SourceOrg) -> $($cached.GitHubOrg)" -ForegroundColor White
+        Write-Host "  Subscription: $($cached.SubscriptionId)" -ForegroundColor White
+        Write-Host "  Primary: $($cached.PrimaryLocation) ($($cached.PrimaryShort))" -ForegroundColor White
+        Write-Host "  Secondary: $($cached.SecondaryLocation) ($($cached.SecondaryShort))" -ForegroundColor White
+        Write-Host ""
+        $reuse = Read-Host "  Use this configuration? (Y/n)"
+        if (-not $reuse -or $reuse -eq 'Y' -or $reuse -eq 'y') {
+            # Re-prompt only for the secret
+            $cached['DRPassword'] = Read-Parameter -Prompt "DR failover password (for Key Vault)" -Required -IsSecure
+            Write-Host ""
+            return $cached
+        }
+        Write-Host "  Starting fresh configuration..." -ForegroundColor Yellow
+        Write-Host ""
+    }
+
     Write-Host ""
     Write-Host ("=" * 80) -ForegroundColor Magenta
     Write-Host "  RAD Showcase — Environment Bootstrap" -ForegroundColor Magenta
@@ -464,6 +525,9 @@ function Get-BootstrapConfig {
         Write-Host "Aborted by user." -ForegroundColor Red
         exit 0
     }
+
+    # Save config for future re-runs (excludes DRPassword)
+    Save-BootstrapConfig -Config $config
 
     return $config
 }
