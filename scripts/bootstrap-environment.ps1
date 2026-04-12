@@ -1523,10 +1523,14 @@ function Invoke-InfraPhase {
         }
     }
 
-    Invoke-CommandSafe -Description "Running terragrunt apply --all..." -Command {
+    Write-Step "Running terragrunt apply --all in $licEnvPath..."
+    if (-not $DryRun) {
         Push-Location $licEnvPath
         try {
             terragrunt apply --all --non-interactive 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "terragrunt apply failed with exit code $LASTEXITCODE"
+            }
         }
         finally {
             Pop-Location
