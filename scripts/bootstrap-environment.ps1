@@ -1600,16 +1600,16 @@ function Invoke-InfraPhase {
                 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             Write-Info "Cleared terragrunt cache"
 
-            $tgLogFile = Join-Path $licEnvPath "terragrunt-apply.log"
-            Write-Info "Terragrunt output logged to: $tgLogFile"
-            & terragrunt run-all apply --non-interactive 2>&1 | Tee-Object -FilePath $tgLogFile -Append
+            # Set TF_INPUT=false as additional safeguard for non-interactive mode
+            $env:TF_INPUT = "false"
+
+            # Run terragrunt directly — no pipes, which would break --non-interactive
+            # and swallow $LASTEXITCODE. Output goes to console + transcript.
+            & terragrunt run-all apply --non-interactive --terragrunt-non-interactive
             $tgExit = $LASTEXITCODE
             if ($tgExit -ne 0) {
                 Write-Err "terragrunt apply failed with exit code $tgExit"
-                Write-Info "Full log: $tgLogFile"
-                # Show last 20 error lines for quick diagnosis
-                Write-Info "Last errors:"
-                Get-Content $tgLogFile | Select-String "ERROR|Error" | Select-Object -Last 10 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+                Write-Info "Check the output above for details."
                 Write-Info "You can also run manually:"
                 Write-Info "  cd '$licEnvPath'"
                 Write-Info "  terragrunt run-all apply --non-interactive"
