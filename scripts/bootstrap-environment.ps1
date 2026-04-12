@@ -263,8 +263,14 @@ function Get-BootstrapConfig {
 
     # --- Source & Target Org ---
     Write-Host "--- GitHub Configuration ---" -ForegroundColor Cyan
+    Write-Host "  Enter org/user name only (e.g. 'DeepMalh44'), NOT a full URL." -ForegroundColor DarkGray
     $sourceOrg = Read-Parameter -Prompt "Source GitHub org (fork from)" -Default "DeepMalh44"
     $gitHubOrg = Read-Parameter -Prompt "Your GitHub org (fork to)" -Required
+
+    # Sanitize: strip URL prefixes and trailing slashes
+    $sourceOrg = $sourceOrg -replace '^https?://github\.com/', '' -replace '/$', ''
+    $gitHubOrg = $gitHubOrg -replace '^https?://github\.com/', '' -replace '/$', ''
+
     $reposBasePath = Read-Parameter -Prompt "Local path to clone repos into" -Default "$HOME\repos\radshow" -Required
 
     # --- Environment ---
