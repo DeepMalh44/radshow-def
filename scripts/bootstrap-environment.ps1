@@ -32,7 +32,7 @@
 ║     - GitHub CLI (gh) — logged in: gh auth login                           ║
 ║     - Terraform >= 1.5                                                     ║
 ║     - Terragrunt >= 1.0                                                    ║
-║     - Docker (for container builds)                                        ║
+║     - Docker (optional — only for local container builds)                   ║
 ║     - Git                                                                  ║
 ║                                                                            ║
 ║   HOW TO RUN:                                                              ║
@@ -472,17 +472,20 @@ function Invoke-PrereqsPhase {
     param([hashtable]$Config)
     Write-Phase "Prerequisites" "Validating required tools and authentication"
 
-    $tools = @(
+    $requiredTools = @(
         @{ Name = 'az';         Check = { az version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
         @{ Name = 'gh';         Check = { gh --version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
         @{ Name = 'terraform';  Check = { terraform version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
         @{ Name = 'terragrunt'; Check = { terragrunt --version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
-        @{ Name = 'docker';     Check = { docker version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
         @{ Name = 'git';        Check = { git --version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 } }
     )
 
+    $optionalTools = @(
+        @{ Name = 'docker'; Check = { docker version 2>&1 | Out-Null; $LASTEXITCODE -eq 0 }; Reason = 'Only needed for local container builds — ACR Tasks handles cloud builds' }
+    )
+
     $allGood = $true
-    foreach ($tool in $tools) {
+    foreach ($tool in $requiredTools) {
         Write-Step "Checking $($tool.Name)..."
         if (& $tool.Check) {
             Write-Success "$($tool.Name) is installed"
@@ -490,6 +493,16 @@ function Invoke-PrereqsPhase {
         else {
             Write-Err "$($tool.Name) is not installed or not in PATH"
             $allGood = $false
+        }
+    }
+
+    foreach ($tool in $optionalTools) {
+        Write-Step "Checking $($tool.Name) (optional)..."
+        if (& $tool.Check) {
+            Write-Success "$($tool.Name) is installed"
+        }
+        else {
+            Write-Host "  [WARN] $($tool.Name) is not installed — $($tool.Reason)" -ForegroundColor DarkYellow
         }
     }
 
