@@ -4,15 +4,15 @@ Automates the **full setup** of a RAD Showcase environment from scratch — fork
 
 ## Prerequisites
 
-| Tool | Minimum Version | Install |
-|------|----------------|---------|
-| PowerShell | 7.0+ | `winget install Microsoft.PowerShell` |
-| Azure CLI | Latest | `winget install Microsoft.AzureCLI` |
-| GitHub CLI | Latest | `winget install GitHub.cli` |
-| Terraform | 1.5+ | [terraform.io/downloads](https://developer.hashicorp.com/terraform/downloads) |
-| Terragrunt | 1.0+ | [terragrunt.gruntwork.io](https://terragrunt.gruntwork.io/docs/getting-started/install/) |
-| Docker | Latest | [docs.docker.com](https://docs.docker.com/get-docker/) |
-| Git | Latest | `winget install Git.Git` |
+| Tool | Minimum Version | Install | Notes |
+|------|----------------|---------|-------|
+| PowerShell | 7.0+ | `winget install Microsoft.PowerShell` | |
+| Azure CLI | Latest | `winget install Microsoft.AzureCLI` | |
+| GitHub CLI | Latest | `winget install GitHub.cli` | |
+| Terraform | 1.5+ | [terraform.io/downloads](https://developer.hashicorp.com/terraform/downloads) | |
+| Terragrunt | 1.0+ | [terragrunt.gruntwork.io](https://terragrunt.gruntwork.io/docs/getting-started/install/) | |
+| Docker | Latest | [docs.docker.com](https://docs.docker.com/get-docker/) | *Optional — only for local container builds* |
+| Git | Latest | `winget install Git.Git` | |
 
 **Before running**, log in to both Azure and GitHub:
 
@@ -94,7 +94,7 @@ Shows what would be created/configured without actually doing it.
 | 5a | **OIDC** *(GitHubHosted)* | Creates App Registration, Service Principal, 5 federated creds, 3 RBAC roles | ~2 min |
 | 5b | **RunnerInfra** *(SelfHosted)* | Creates VMSS runners, NSG, NAT Gateway, MI, RBAC, installs runner agent | ~10 min |
 | 6 | **GitHubSetup** | Creates GitHub environments, sets all secrets on all repos | ~2 min |
-| 7 | **Infra** | Runs `terragrunt apply --all` (SQL MI alone takes 2-6 hours) | **2-6 hrs** |
+| 7 | **Infra** | Runs `terragrunt run-all apply -auto-approve --terragrunt-non-interactive` (SQL MI alone takes 2-6 hours) | **2-6 hrs** |
 | 8 | **PostInfra** | Reads FOG listener FQDN, sets `SQL_MI_FQDN` secret | ~1 min |
 | 9 | **Deploy** | Enables Actions, pushes to trigger pipelines: db → api → apim → spa | ~20 min |
 | 10 | **PostDeploy** | Seeds Key Vault secrets, RBAC upgrades, CAE DNS zones | ~5 min |
@@ -179,6 +179,22 @@ Every phase is **idempotent** — it checks if work is already done before actin
 # Example: Infra phase timed out
 .\bootstrap-environment.ps1 -Phase Infra
 ```
+
+## Configuration Caching
+
+After the first run, the script saves your configuration (except the DR password) to `.bootstrap-config.json`. On subsequent runs, you'll be asked:
+
+```
+Found saved configuration from previous run
+  Environment: STG01
+  GitHub: DeepMalh44 -> ketz1014-test
+  ...
+  Use this configuration? (Y/n):
+```
+
+Press Enter to reuse the saved config (you'll only be re-prompted for the DR password). Type `n` to start fresh.
+
+> The config file is excluded from git via `.gitignore`.
 
 ## Logging
 

@@ -172,6 +172,11 @@ function Write-Err {
     Write-Host "  [ERROR] $Message" -ForegroundColor Red
 }
 
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "  [WARN] $Message" -ForegroundColor DarkYellow
+}
+
 function Write-Info {
     param([string]$Message)
     Write-Host "  $Message" -ForegroundColor White

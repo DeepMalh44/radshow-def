@@ -26,3 +26,6 @@ Thumbs.db
 
 # Bootstrap config (contains env-specific values)
 .bootstrap-config.json
+
+# Bootstrap log files
+bootstrap-*.log
