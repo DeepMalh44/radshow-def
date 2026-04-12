@@ -1518,7 +1518,8 @@ function Invoke-InfraPhase {
         $confirm = Read-Host "  Start infrastructure deployment now? (Y/n)"
         if ($confirm -and $confirm -ne 'Y' -and $confirm -ne 'y') {
             Write-Info "Skipped. Re-run with -Phase Infra when ready."
-            return
+            Write-Info "Remaining phases (PostInfra, Deploy, PostDeploy, Verify) also skipped."
+            return 'SKIPPED'
         }
     }
 
@@ -1911,6 +1912,7 @@ $oidcResult = $null
 $runnerInfraResult = $null
 foreach ($p in $phasesToRun) {
     try {
+        $phaseResult = $null
         switch ($p) {
             'Prereqs'      { Invoke-PrereqsPhase -Config $config }
             'ForkClone'    { Invoke-ForkClonePhase -Config $config }
@@ -1919,11 +1921,16 @@ foreach ($p in $phasesToRun) {
             'OIDC'         { $oidcResult = Invoke-OIDCPhase -Config $config }
             'RunnerInfra'  { $runnerInfraResult = Invoke-RunnerInfraPhase -Config $config }
             'GitHubSetup'  { Invoke-GitHubSetupPhase -Config $config -OidcResult $oidcResult -RunnerInfraResult $runnerInfraResult }
-            'Infra'        { Invoke-InfraPhase -Config $config }
+            'Infra'        { $phaseResult = Invoke-InfraPhase -Config $config }
             'PostInfra'    { Invoke-PostInfraPhase -Config $config }
             'Deploy'       { Invoke-DeployPhase -Config $config }
             'PostDeploy'   { Invoke-PostDeployPhase -Config $config }
             'Verify'       { Invoke-VerifyPhase -Config $config }
+        }
+        if ($phaseResult -eq 'SKIPPED') {
+            Write-Host ""
+            Write-Host "  Pipeline stopped. Resume later with: .\bootstrap-environment.ps1 -Phase $p" -ForegroundColor Yellow
+            break
         }
     }
     catch {
