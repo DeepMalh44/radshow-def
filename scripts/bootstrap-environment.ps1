@@ -1523,23 +1523,22 @@ function Invoke-InfraPhase {
         }
     }
 
-    Write-Step "Running terragrunt apply --all in $licEnvPath..."
+    Write-Step "Running terragrunt run-all apply in $licEnvPath..."
     if (-not $DryRun) {
-        Push-Location $licEnvPath
         try {
-            # Run terragrunt with real-time output (not captured)
-            & terragrunt apply --all --non-interactive
+            # Use --working-dir to avoid issues with spaces in path via Push-Location
+            & terragrunt run-all apply --non-interactive --working-dir "$licEnvPath"
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "terragrunt apply failed with exit code $LASTEXITCODE"
                 Write-Info "Check the output above for details."
                 Write-Info "You can also run manually:"
                 Write-Info "  cd '$licEnvPath'"
-                Write-Info "  terragrunt apply --all --non-interactive"
+                Write-Info "  terragrunt run-all apply --non-interactive"
                 throw "terragrunt apply failed with exit code $LASTEXITCODE"
             }
         }
-        finally {
-            Pop-Location
+        catch {
+            throw
         }
     }
 
