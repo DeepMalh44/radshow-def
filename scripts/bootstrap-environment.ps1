@@ -1527,8 +1527,14 @@ function Invoke-InfraPhase {
     if (-not $DryRun) {
         Push-Location $licEnvPath
         try {
-            terragrunt apply --all --non-interactive 2>&1
+            # Run terragrunt with real-time output (not captured)
+            & terragrunt apply --all --non-interactive
             if ($LASTEXITCODE -ne 0) {
+                Write-Err "terragrunt apply failed with exit code $LASTEXITCODE"
+                Write-Info "Check the output above for details."
+                Write-Info "You can also run manually:"
+                Write-Info "  cd '$licEnvPath'"
+                Write-Info "  terragrunt apply --all --non-interactive"
                 throw "terragrunt apply failed with exit code $LASTEXITCODE"
             }
         }
