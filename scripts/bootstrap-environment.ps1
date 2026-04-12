@@ -966,9 +966,13 @@ function Invoke-OIDCPhase {
                 issuer    = $OIDC_ISSUER
                 subject   = $subject
                 audiences = @($OIDC_AUDIENCE)
-            } | ConvertTo-Json -Compress
+            } | ConvertTo-Json -Depth 4
 
-            $credResult = az ad app federated-credential create --id $appId --parameters $credParams 2>&1
+            # Write to temp file to avoid PowerShell JSON quoting issues with az cli
+            $tempFile = [System.IO.Path]::GetTempFileName()
+            Set-Content -Path $tempFile -Value $credParams -Encoding utf8
+            $credResult = az ad app federated-credential create --id $appId --parameters "@$tempFile" 2>&1
+            Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "Failed to create federated credential for $repo — $credResult"
             }
