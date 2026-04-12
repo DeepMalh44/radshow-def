@@ -951,6 +951,39 @@ function Invoke-TFStatePhase {
     }
     Write-Success "Storage account ready"
 
+    # Assign Storage Blob Data Contributor to current user (required for azuread_auth backend)
+    Write-Step "Assigning Storage Blob Data Contributor on TF state storage account..."
+    if (-not $DryRun) {
+        $currentUser = az ad signed-in-user show --query "id" -o tsv 2>&1
+        if ($LASTEXITCODE -eq 0 -and $currentUser) {
+            $storageScope = "/subscriptions/$($Config.SubscriptionId)/resourceGroups/$($Config.TfStateResourceGroup)/providers/Microsoft.Storage/storageAccounts/$($Config.TfStateStorageAccount)"
+            $existingRole = az role assignment list --assignee $currentUser.Trim() --scope $storageScope --role "Storage Blob Data Contributor" --query "[0].id" -o tsv 2>&1
+            if ($existingRole -and $existingRole -ne '') {
+                Write-Skip "Storage Blob Data Contributor already assigned"
+            }
+            else {
+                az role assignment create `
+                    --role "Storage Blob Data Contributor" `
+                    --assignee-object-id $currentUser.Trim() `
+                    --assignee-principal-type User `
+                    --scope $storageScope `
+                    --output none 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "Could not auto-assign Storage Blob Data Contributor. Assign manually:"
+                    Write-Info "  az role assignment create --role 'Storage Blob Data Contributor' --assignee '$($currentUser.Trim())' --scope '$storageScope'"
+                }
+                else {
+                    Write-Success "Storage Blob Data Contributor assigned"
+                    Write-Info "Waiting 30s for RBAC propagation..."
+                    Start-Sleep -Seconds 30
+                }
+            }
+        }
+        else {
+            Write-Warn "Could not determine current user. Ensure Storage Blob Data Contributor is assigned on $($Config.TfStateStorageAccount)"
+        }
+    }
+
     # Create blob container
     Invoke-CommandSafe -Description "Creating blob container $($Config.TfStateContainer)..." -Command {
         az storage container create `
