@@ -1526,8 +1526,9 @@ function Invoke-InfraPhase {
     Write-Step "Running terragrunt run-all apply in $licEnvPath..."
     if (-not $DryRun) {
         try {
-            # Use --working-dir to avoid issues with spaces in path via Push-Location
-            & terragrunt run-all apply --non-interactive --working-dir "$licEnvPath"
+            # Push-Location handles spaces in OneDrive paths; --working-dir does not
+            Push-Location $licEnvPath
+            & terragrunt run-all apply --non-interactive
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "terragrunt apply failed with exit code $LASTEXITCODE"
                 Write-Info "Check the output above for details."
@@ -1539,6 +1540,9 @@ function Invoke-InfraPhase {
         }
         catch {
             throw
+        }
+        finally {
+            Pop-Location
         }
     }
 
