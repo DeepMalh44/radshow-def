@@ -1558,9 +1558,11 @@ function Invoke-InfraPhase {
     }
 
     # Push local config changes first
-    Write-Step "Pushing configuration changes to GitHub..."
+    Write-Step "Syncing radshow-lic with GitHub..."
     if (-not $DryRun) {
         Push-Location (Join-Path $Config.ReposBasePath "radshow-lic")
+        # Pull latest changes (e.g. upstream fixes merged since last run)
+        git pull origin main 2>&1 | Out-Null
         $status = git status --porcelain 2>&1
         if ($status) {
             git add -A 2>&1 | Out-Null
@@ -1568,7 +1570,7 @@ function Invoke-InfraPhase {
         }
         git push origin main 2>&1 | Out-Null
         Pop-Location
-        Write-Success "radshow-lic pushed"
+        Write-Success "radshow-lic synced"
     }
 
     Write-Host ""
@@ -1592,6 +1594,12 @@ function Invoke-InfraPhase {
         try {
             # Push-Location handles spaces in OneDrive paths; --working-dir does not
             Push-Location $licEnvPath
+
+            # Clear terragrunt cache to avoid stale module references
+            Get-ChildItem -Recurse -Filter ".terragrunt-cache" -Directory -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Info "Cleared terragrunt cache"
+
             & terragrunt run-all apply --non-interactive
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "terragrunt apply failed with exit code $LASTEXITCODE"
