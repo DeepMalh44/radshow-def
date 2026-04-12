@@ -605,12 +605,25 @@ function Invoke-ForkClonePhase {
             }
             else {
                 Write-Step "Forking $sourceRepo to $($Config.GitHubOrg) and cloning..."
-                $forkResult = Invoke-CommandSafe -Description "Fork + clone $repo" -Command {
-                    gh repo fork $sourceRepo --org $Config.GitHubOrg --clone=true
-                } -AllowFailure
 
-                if (-not $forkResult -and -not (Test-Path $localPath)) {
-                    Write-Err "Fork failed for $repo. This may be due to org policy."
+                # Detect if target is a GitHub org or personal account
+                $isOrg = $false
+                gh api "orgs/$($Config.GitHubOrg)" 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { $isOrg = $true }
+
+                if ($isOrg) {
+                    Write-Info "  Target is a GitHub organization — using --org flag"
+                    $forkOutput = gh repo fork $sourceRepo --org $Config.GitHubOrg --clone=true 2>&1
+                }
+                else {
+                    Write-Info "  Target is a personal account — forking to authenticated user"
+                    $forkOutput = gh repo fork $sourceRepo --clone=true --default-branch-only 2>&1
+                }
+                $forkExitCode = $LASTEXITCODE
+
+                if ($forkExitCode -ne 0 -and -not (Test-Path $localPath)) {
+                    Write-Err "Fork failed for $repo (exit code $forkExitCode):"
+                    Write-Host "    $forkOutput" -ForegroundColor Red
                     Write-Info "  Fork manually: https://github.com/$sourceRepo/fork"
                     Write-Info "  Then clone:    gh repo clone $targetRepo $localPath"
                     continue
