@@ -765,8 +765,8 @@ function Invoke-ConfigurePhase {
             $content = Get-Content $apimHclPath -Raw
             $primaryZones = if ($Config.ZoneRedundantPrimary) { '["1", "2", "3"]' } else { '[]' }
             if ($content -match '(zones\s*=\s*)(\[[^\]]*\])') {
-                # Replace first occurrence (primary zones)
-                $content = $content -replace '(zones\s*=\s*)(\[[^\]]*\])', "`${1}$primaryZones", 1
+                # Replace first occurrence only (primary zones)
+                $content = [regex]::Replace($content, '(zones\s*=\s*)(\[[^\]]*\])', "`${1}$primaryZones", [System.Text.RegularExpressions.RegexOptions]::None)
                 Set-Content -Path $apimHclPath -Value $content -NoNewline
                 Write-Info "  apim: zones = $primaryZones"
             }
