@@ -844,6 +844,25 @@ function Invoke-ConfigurePhase {
         Write-Success "Zone redundancy flags updated"
     }
 
+    # --- Temporarily enable Key Vault public access for bootstrap ---
+    # During bootstrap, Terraform runs locally (outside VNet) and needs data plane
+    # access to create the AppGW self-signed certificate. With self-hosted runners,
+    # CI/CD will access KV via private endpoints so public access isn't needed later.
+    # PostDeploy phase locks KVs back down after all secrets are seeded.
+    if (-not $DryRun) {
+        Write-Step "Enabling Key Vault public access for bootstrap (will be locked down in PostDeploy)..."
+        $kvEnvCommon = Join-Path $licPath "_envcommon" "key-vault.hcl"
+        if (Test-Path $kvEnvCommon) {
+            $content = Get-Content $kvEnvCommon -Raw
+            if ($content -match '(public_network_access_enabled\s*=\s*)(true|false)') {
+                $content = $content -replace '(public_network_access_enabled\s*=\s*)(true|false)', '${1}true'
+                Set-Content -Path $kvEnvCommon -Value $content -NoNewline
+                Write-Info "  key-vault _envcommon: public_network_access_enabled = true (temporary)"
+            }
+        }
+        Write-Success "Key Vault public access enabled for bootstrap"
+    }
+
     # --- Update module source URLs in _envcommon ---
     $envCommonPath = Join-Path $licPath "_envcommon"
     if (Test-Path $envCommonPath) {
@@ -1894,6 +1913,28 @@ function Invoke-PostDeployPhase {
             az keyvault update --name $kvName -g $rg `
                 --public-network-access disabled --output none 2>&1 | Out-Null
             Write-Success "$kvName locked down"
+        }
+    }
+
+    # --- Restore Key Vault config to private access for future Terraform runs ---
+    $licPath = Join-Path $Config.ReposBasePath "radshow-lic"
+    $kvEnvCommon = Join-Path $licPath "_envcommon" "key-vault.hcl"
+    if (Test-Path $kvEnvCommon) {
+        Write-Step "Restoring Key Vault config to public_network_access_enabled = false..."
+        if (-not $DryRun) {
+            $content = Get-Content $kvEnvCommon -Raw
+            $content = $content -replace '(public_network_access_enabled\s*=\s*)(true|false)', '${1}false'
+            Set-Content -Path $kvEnvCommon -Value $content -NoNewline
+
+            Push-Location $licPath
+            $status = git status --porcelain 2>&1
+            if ($status) {
+                git add -A 2>&1 | Out-Null
+                git commit -m "chore: restore Key Vault private access after bootstrap" 2>&1 | Out-Null
+                git push origin main 2>&1 | Out-Null
+            }
+            Pop-Location
+            Write-Success "Key Vault config restored to private access"
         }
     }
 
