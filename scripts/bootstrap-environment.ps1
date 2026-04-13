@@ -464,7 +464,7 @@ function Get-BootstrapConfig {
         # Derived — Data & Caching
         StorageAccountPrimary  = "stradshow$envLower$($primaryShort.ToLower())"
         StorageAccountSecondary = "stradshow$envLower$($secondaryShort.ToLower())"
-        AcrName                = "acrradshow$envLower"
+        AcrName                = "acrradshow$envLower$($primaryShort.ToLower())"
         SqlMiFogName           = "fog-radshow-$envLower"
         RedisPrimary           = "redis-radshow-$envLower-$($primaryShort.ToLower())"
         RedisSecondary         = "redis-radshow-$envLower-$($secondaryShort.ToLower())"
@@ -1724,6 +1724,39 @@ function Invoke-InfraPhase {
             } else {
                 Write-Info "$kvName does not exist yet — will be created with public access"
             }
+        }
+    }
+
+    # --- Pre-flight: Seed ACR with placeholder image for Container Apps ---
+    # Container Apps need an image in ACR to provision. On first bootstrap the
+    # API image hasn't been built yet (that's done by radshow-api CI/CD).
+    # We import a lightweight Microsoft hello-world image as a placeholder.
+    # CI/CD will later push the real image, overwriting this naturally.
+    Write-Step "Checking ACR for required container images..."
+    if (-not $DryRun) {
+        $acrName = $Config.AcrName
+        $acrExists = az acr show --name $acrName --query "name" -o tsv 2>&1
+        if ($LASTEXITCODE -eq 0 -and $acrExists) {
+            $requiredImages = @('radshow-products-api')
+            foreach ($img in $requiredImages) {
+                $tags = az acr repository show-tags --name $acrName --repository $img -o tsv 2>&1
+                if ($LASTEXITCODE -ne 0 -or -not $tags) {
+                    Write-Info "  $img not found in ACR — importing placeholder..."
+                    az acr import --name $acrName `
+                        --source "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest" `
+                        --image "${img}:latest" `
+                        --output none 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Success "  $img`:latest placeholder imported"
+                    } else {
+                        Write-Warn "  Could not import placeholder for $img — Container Apps may fail on first run"
+                    }
+                } else {
+                    Write-Skip "  $img already in ACR"
+                }
+            }
+        } else {
+            Write-Info "ACR $acrName does not exist yet — will be created by terragrunt. Container Apps may need a re-run."
         }
     }
 
