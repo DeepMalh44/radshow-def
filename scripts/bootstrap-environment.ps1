@@ -1627,6 +1627,44 @@ function Invoke-InfraPhase {
         }
     }
 
+    # --- Pre-flight: Assign Key Vault data plane RBAC to current user ---
+    # Key Vaults use enable_rbac_authorization=true, so Contributor alone
+    # doesn't grant data plane access. Terraform needs Certificates Officer
+    # to create the AppGW self-signed cert, and Secrets Officer for later phases.
+    Write-Step "Ensuring Key Vault data plane RBAC for current user..."
+    if (-not $DryRun) {
+        $currentUser = az ad signed-in-user show --query "id" -o tsv 2>&1
+        if ($LASTEXITCODE -eq 0 -and $currentUser) {
+            $currentUser = $currentUser.Trim()
+            $subscriptionScope = "/subscriptions/$($Config.SubscriptionId)"
+            foreach ($kvRole in @('Key Vault Certificates Officer', 'Key Vault Secrets Officer')) {
+                $existingRole = az role assignment list --assignee $currentUser --scope $subscriptionScope --role $kvRole --query "[0].id" -o tsv 2>&1
+                if ($existingRole -and $existingRole -ne '') {
+                    Write-Skip "$kvRole already assigned"
+                }
+                else {
+                    az role assignment create `
+                        --role $kvRole `
+                        --assignee-object-id $currentUser `
+                        --assignee-principal-type User `
+                        --scope $subscriptionScope `
+                        --output none 2>&1
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Success "$kvRole assigned"
+                    }
+                    else {
+                        Write-Warn "Could not assign $kvRole. You may need to assign it manually."
+                    }
+                }
+            }
+            Write-Info "Waiting 30s for RBAC propagation..."
+            Start-Sleep -Seconds 30
+        }
+        else {
+            Write-Warn "Could not determine current user. Ensure Key Vault Certificates Officer is assigned."
+        }
+    }
+
     Write-Step "Running terragrunt run-all apply in $licEnvPath..."
     if (-not $DryRun) {
         try {
