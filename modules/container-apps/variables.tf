@@ -91,3 +91,9 @@ variable "vnet_ids_for_dns_link" {
   type        = list(string)
   default     = []
 }
+
+variable "acr_id" {
+  description = "ACR resource ID. When set, a User-Assigned Managed Identity is created with AcrPull role, ensuring image pull permissions exist before the Container App is created."
+  type        = string
+  default     = null
+}

@@ -10,6 +10,30 @@ resource "azurerm_container_app_environment" "this" {
   tags = var.tags
 }
 
+#--------------------------------------------------------------
+# User-Assigned Managed Identity for ACR pull
+# Created BEFORE the Container App so AcrPull is in place when
+# the first revision tries to pull the image. Avoids the
+# chicken-and-egg where SystemAssigned identity only exists
+# after the CA is created (too late for the initial image pull).
+#--------------------------------------------------------------
+resource "azurerm_user_assigned_identity" "acr_pull" {
+  count = var.acr_id != null ? 1 : 0
+
+  name                = "${var.environment_name}-acr-pull-mi"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  tags                = var.tags
+}
+
+resource "azurerm_role_assignment" "acr_pull" {
+  count = var.acr_id != null ? 1 : 0
+
+  scope                = var.acr_id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.acr_pull[0].principal_id
+}
+
 resource "azurerm_container_app" "this" {
   for_each = var.container_apps
 
@@ -17,6 +41,9 @@ resource "azurerm_container_app" "this" {
   container_app_environment_id = azurerm_container_app_environment.this.id
   resource_group_name          = var.resource_group_name
   revision_mode                = each.value.revision_mode
+
+  # Ensure AcrPull is assigned before the CA tries to pull
+  depends_on = [azurerm_role_assignment.acr_pull]
 
   dynamic "ingress" {
     for_each = each.value.ingress != null ? [each.value.ingress] : []
@@ -61,15 +88,18 @@ resource "azurerm_container_app" "this" {
     for_each = each.value.registry != null ? [each.value.registry] : []
     content {
       server   = registry.value.server
-      identity = registry.value.identity
+      identity = var.acr_id != null ? azurerm_user_assigned_identity.acr_pull[0].id : registry.value.identity
     }
   }
 
   dynamic "identity" {
     for_each = each.value.identity != null ? [each.value.identity] : []
     content {
-      type         = identity.value.type
-      identity_ids = identity.value.identity_ids
+      type = var.acr_id != null && identity.value.type == "SystemAssigned" ? "SystemAssigned, UserAssigned" : identity.value.type
+      identity_ids = var.acr_id != null ? concat(
+        coalesce(identity.value.identity_ids, []),
+        [azurerm_user_assigned_identity.acr_pull[0].id]
+      ) : identity.value.identity_ids
     }
   }
 
