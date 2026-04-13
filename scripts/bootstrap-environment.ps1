@@ -1702,6 +1702,31 @@ function Invoke-InfraPhase {
         }
     }
 
+    # --- Pre-flight: Unlock Key Vaults via CLI ---
+    # The KV module deploys with public_network_access=false by default.
+    # Even though Configure changed the HCL to true, existing KVs in Azure are still
+    # locked. Terraform's plan reads the certificate data source BEFORE it can update
+    # the KV resource, causing a 403. We must unlock via CLI first.
+    Write-Step "Unlocking Key Vaults for Terraform data plane access..."
+    if (-not $DryRun) {
+        foreach ($kvName in @($Config.KeyVaultPrimary, $Config.KeyVaultSecondary)) {
+            $exists = az keyvault show --name $kvName --query "name" -o tsv 2>&1
+            if ($LASTEXITCODE -eq 0 -and $exists) {
+                az keyvault update --name $kvName `
+                    --public-network-access enabled `
+                    --default-action Allow `
+                    --output none 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Success "$kvName unlocked (public access + Allow)"
+                } else {
+                    Write-Warn "Could not unlock $kvName — Terraform may fail on certificate reads"
+                }
+            } else {
+                Write-Info "$kvName does not exist yet — will be created with public access"
+            }
+        }
+    }
+
     Write-Step "Running terragrunt run-all apply in $licEnvPath..."
     if (-not $DryRun) {
         try {
