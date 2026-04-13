@@ -368,7 +368,14 @@ function Get-BootstrapConfig {
     # --- SQL MI ---
     Write-Host ""
     Write-Host "--- SQL Managed Instance ---" -ForegroundColor Cyan
-    $entraAdminGroupOid = Read-Parameter -Prompt "Entra admin security group Object ID (for SQL MI)" -Required
+    Write-Host "  The Object ID must be a valid GUID (36 chars, e.g. 12345678-abcd-1234-abcd-1234567890ab)." -ForegroundColor DarkGray
+    Write-Host "  You can find it via: az ad group show --group <name> --query id -o tsv" -ForegroundColor DarkGray
+    do {
+        $entraAdminGroupOid = Read-Parameter -Prompt "Entra admin security group Object ID (for SQL MI)" -Required
+        if ($entraAdminGroupOid -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
+            Write-Warn "  '$entraAdminGroupOid' is not a valid GUID. SQL MI requires a 36-char UUID, not a group name."
+        }
+    } while ($entraAdminGroupOid -notmatch '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$')
     $sqlDatabaseName = Read-Parameter -Prompt "SQL database name" -Default "radshow"
 
     # --- TF State ---
@@ -856,9 +863,20 @@ function Invoke-ConfigurePhase {
             $content = Get-Content $kvEnvCommon -Raw
             if ($content -match '(public_network_access_enabled\s*=\s*)(true|false)') {
                 $content = $content -replace '(public_network_access_enabled\s*=\s*)(true|false)', '${1}true'
-                Set-Content -Path $kvEnvCommon -Value $content -NoNewline
                 Write-Info "  key-vault _envcommon: public_network_access_enabled = true (temporary)"
             }
+            # Also override network_acls default_action to Allow so the firewall doesn't block
+            # traffic even with public access enabled (default_action=Deny + no IP rules = blocked)
+            if ($content -notmatch 'network_acls\s*=') {
+                # Inject network_acls input just after public_network_access_enabled line
+                $content = $content -replace '(public_network_access_enabled\s*=\s*true)', "`$1`n  network_acls = { bypass = `"AzureServices`", default_action = `"Allow`", ip_rules = [], virtual_network_subnet_ids = [] }"
+                Write-Info "  key-vault _envcommon: network_acls.default_action = Allow (temporary)"
+            } else {
+                # network_acls already exists — update default_action to Allow
+                $content = $content -replace '(default_action\s*=\s*")\w+(")', '${1}Allow${2}'
+                Write-Info "  key-vault _envcommon: network_acls.default_action = Allow (temporary)"
+            }
+            Set-Content -Path $kvEnvCommon -Value $content -NoNewline
         }
         Write-Success "Key Vault public access enabled for bootstrap"
     }
@@ -1920,10 +1938,12 @@ function Invoke-PostDeployPhase {
     $licPath = Join-Path $Config.ReposBasePath "radshow-lic"
     $kvEnvCommon = Join-Path $licPath "_envcommon" "key-vault.hcl"
     if (Test-Path $kvEnvCommon) {
-        Write-Step "Restoring Key Vault config to public_network_access_enabled = false..."
+        Write-Step "Restoring Key Vault config to private access (public_network_access + network_acls)..."
         if (-not $DryRun) {
             $content = Get-Content $kvEnvCommon -Raw
             $content = $content -replace '(public_network_access_enabled\s*=\s*)(true|false)', '${1}false'
+            # Remove the temporary network_acls line injected during Configure
+            $content = $content -replace '\n\s*network_acls\s*=\s*\{[^}]+\}', ''
             Set-Content -Path $kvEnvCommon -Value $content -NoNewline
 
             Push-Location $licPath
